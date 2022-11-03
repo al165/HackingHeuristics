@@ -72,6 +72,8 @@ class FilterProcessor(Processor):
         )
 
     def __call__(self, y: np.ndarray) -> np.ndarray:
+        if len(y) == 0:
+            return y
         data_filtered = scipy.signal.sosfilt(self.filter, y)
         return data_filtered
 
@@ -134,6 +136,23 @@ class RecordProcessor(Processor):
                 f.write(f"{value}\n")
 
         return y
+
+
+class RescaleProcessor(Processor):
+    def __init__(self, in_range: Tuple, out_range: Tuple = (-1, 1), clip: bool = True, sr: int = 256,):
+        super(RescaleProcessor, self).__init__(sr=sr)
+        self.in_range = in_range
+        self.out_range = out_range
+        self.clip = clip
+
+    def __call__(self, y: np.ndarray) -> np.ndarray:
+        rescaled = (y - self.in_range[0]) / (self.in_range[1] - self.in_range[0])
+        if self.clip:
+            rescaled = np.clip(rescaled, 0, 1)
+        rescaled *= (self.out_range[1] - self.out_range[0])
+        rescaled += self.out_range[0]
+
+        return rescaled
 
 
 

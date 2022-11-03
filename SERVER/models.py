@@ -158,11 +158,7 @@ class LinearVAE(nn.Module):
         self.kl = 0
 
     def forward(self, x):
-        for enc in self.encoders:
-            x = F.relu(enc(x))
-            x = self.dropout(x)
-
-        mu = self.enc_mu(x)
+        mu = self.encode(x)
         log_var = self.enc_log_var(x)
         sigma = torch.exp(log_var)
 
@@ -172,12 +168,7 @@ class LinearVAE(nn.Module):
             -0.5 * torch.sum(1 + log_var - mu**2 - sigma, dim=1), dim=0
         )
 
-        y = mu
-        for dec in self.decoders[:-1]:
-            y = F.relu(dec(y))
-            y = self.dropout(y)
-
-        y = self.decoders[-1](y)
+        y = self.decode(z)
 
         return y, z
 
@@ -189,6 +180,7 @@ class LinearVAE(nn.Module):
             x = self.dropout(x)
 
         mu = self.enc_mu(x)
+        mu = torch.tanh(mu)
 
         return mu
 

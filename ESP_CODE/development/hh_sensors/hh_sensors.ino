@@ -1,26 +1,37 @@
-//#include <ESP8266WiFi.h>
+#if defined(ESP32)
 #include <WiFi.h>
+//#include <WebServer.h>
+//WebServer server(80);
+const int SENSOR0 = 34;  // EEG
+const int SENSOR1 = 32;  // EOG
+const int SENSOR2 = 39;  // heart rate sensor
+const int SENSOR3 = 36;  // GSR
+#else
+#include <ESP8266WiFi.h>
+//#include <ESP8266WebServer.h>
+//ESP8266WebServer server(80);
+const int SENSOR0 = A0;  // EEG
+const int SENSOR1 = A0;  // EOG
+const int SENSOR2 = A0;  // heart rate sensor
+const int SENSOR3 = A0;  // GSR
+#endif
+
+
+#include <ArduinoJson.h>
+#include <WiFiClient.h>
 
 #include <strings_en.h>
 #include <WiFiManager.h>
 
 #include <WiFiUdp.h>
 
-
 WiFiManager wm;
-IPAddress server(192, 168, 23, 90);
+IPAddress server(192, 168, 2, 8);
 const unsigned int PORT = 8080;
 const unsigned int PORT_RANGE = 10;
 unsigned int currentPort = PORT;
 
 WiFiClient client;
-
-//const int SENSOR0 = 34;
-
-const int SENSOR0 = 34;  // EEG
-const int SENSOR1 = 32;  // EOG
-const int SENSOR2 = 39;  // heart rate sensor
-const int SENSOR3 = 36;  // GSR
 
 String data0 = "";
 String data1 = "";
@@ -34,6 +45,7 @@ WiFiUDP UDP;
 char packet[255];
 const unsigned int UDP_PORT = 4210;
 
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
@@ -46,6 +58,8 @@ void setup() {
     Serial.println("Configportal running...");
   }
   Serial.println(" done");
+
+//  server.on(F("/temp"), HTTP_POST, setTemp);
 
   // listen for UDP packets
   UDP.begin(UDP_PORT);

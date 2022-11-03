@@ -1,13 +1,18 @@
 import os
 import sys
+from collections import deque
 from typing import Dict, List, Tuple
 
 import numpy as np
 
 import torch
 
+# from gymnasium import Env, spaces
+
 sys.path.append("..")
 from models import LinearVAE, SimpleNetwork
+
+from sac import SAC_Agent
 
 
 class Translator:
@@ -23,47 +28,59 @@ class VAENetwork:
 
         self.model_params = model_params
         self.model = LinearVAE(**model_params)
-        self.model.eval()
 
-        self.batch = []
+        self.training_data = []
+        self.batch = 0
 
         self.lr = 0.0001
+        self.losses = deque(maxlen=16)
 
         self.optimiser = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        self.criterion = torch.nn.MSELoss(reduction='mean')
+        self.criterion = torch.nn.MSELoss(reduction="mean")
 
     def __call__(self, x: np.ndarray):
         X = torch.from_numpy(x).type(torch.float)
-        self.batch.append(X.detach())
+        # self.batch.append(X.detach())
+        self.batch += 1
+        self.training_data.append(X.detach())
 
-        if len(self.batch) >= 16:
+        if self.batch >= 8:
             self.train()
 
         with torch.no_grad():
-            Y = self.model.encode(X).detach().numpy()
+            Z = self.model.encode(X).detach().numpy()
 
-        return Y
+        return Z
 
     def train(self):
         self.model.train()
-        self.optimiser.zero_grad()
 
-        X = torch.stack(self.batch)
+        batch_losses = []
 
-        R, _ = self.model(X)
-        loss = self.criterion(X, R)
+        for batch in torch.split(torch.stack(self.training_data), 8):
+            self.optimiser.zero_grad()
 
-        loss.backward()
-        self.optimiser.step()
+            X = torch.stack(self.training_data)
+            Z = self.model.encode(X)
+            Y = self.model.decode(Z)
+
+            loss = self.criterion(X, Y)
+
+            loss.backward()
+            self.optimiser.step()
+            batch_losses.append(loss.item())
+
+        self.losses.append(np.mean(batch_losses))
 
         print(" -- Training results:")
         print(f" -- loss: {loss.item()}")
 
-        self.batch = []
+        self.batch = 0
+
+        self.training_data = self.training_data[-256:]
 
 
 class LinearNetwork:
-
     def __init__(self, model_params: Dict[str, float], saved_model: str = None):
 
         self.model_params = model_params
@@ -75,13 +92,13 @@ class LinearNetwork:
         self.lr = 0.001
 
         self.optimiser = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        self.criterion = torch.nn.MSELoss(reduction='mean')
+        self.criterion = torch.nn.MSELoss(reduction="mean")
 
     def __call__(self, x: np.ndarray):
         X = torch.from_numpy(x).type(torch.float).unsqueeze(0)
         self.batch.append(X.detach())
 
-        #if len(self.batch) >= 16:
+        # if len(self.batch) >= 16:
         #    self.train()
 
         with torch.no_grad():
@@ -101,7 +118,145 @@ class LinearNetwork:
         loss.backward()
         self.optimiser.step()
 
-        print(" -- Training results:")
-        print(f" -- loss: {loss.item()}")
+        #print(" -- Training results:")
+        #print(f" -- loss: {loss.item()}")
 
         self.batch = []
+
+
+class Buffer:
+    def __init__(self, state_dim, action_dim, max_size=256, device="cpu"):
+        self.max_size = max_size
+        self.ptr = 0
+        self.size = 0
+        self.state = np.zeros((max_size, state_dim))
+        self.action = np.zeros((max_size, action_dim))
+        self.reward = np.zeros((max_size, 1))
+        self.next_state = np.zeros((max_size, state_dim))
+        self.dead = np.zeros((max_size, 1), dtype=np.uint8)
+        self.device = device
+
+    def add(self, state, action, reward, next_state, dead=False):
+        self.state[self.ptr] = state
+        self.action[self.ptr] = action
+        self.reward[self.ptr] = reward
+        self.next_state[self.ptr] = next_state
+        self.dead[self.ptr] = dead
+
+        self.ptr = (self.ptr + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
+
+    def sample(self, batch_size):
+        ind = np.random.randint(0, self.size, size=batch_size)
+
+        with torch.no_grad():
+            return (
+                torch.FloatTensor(self.state[ind]).to(self.device),
+                torch.FloatTensor(self.action[ind]).to(self.device),
+                torch.FloatTensor(self.reward[ind]).to(self.device),
+                torch.FloatTensor(self.next_state[ind]).to(self.device),
+                torch.FloatTensor(self.dead[ind]).to(self.device),
+            )
+
+
+class SACModel:
+    def __init__(
+        self, train_every: int = 8, batch_size: int = 16, device: str = "cpu", **kwargs
+    ):
+
+        print(kwargs)
+        self.model = SAC_Agent(**kwargs, device=device)
+        self.training_data = Buffer(
+            kwargs.get("state_dim"), kwargs.get("action_dim"), device=device
+        )
+        self.train_every = train_every
+        self.batch_size = batch_size
+
+        self.n = 0
+
+        self.losses = {
+            "a_losses": deque(maxlen=16),
+            "q_losses": deque(maxlen=16),
+        }
+
+    def add(
+        self,
+        state: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        next_state: np.ndarray,
+        dead: bool = False,
+    ):
+
+        self.training_data.add(state, action, reward, next_state, dead)
+        self.n += 1
+
+        if self.n >= self.train_every:
+            a_loss, q_loss = self.model.train(self.training_data)
+            self.losses["a_losses"].append(a_loss)
+            self.losses["q_losses"].append(q_loss)
+            self.n = 0
+
+    def get_action(self, state: np.ndarray, deterministic: bool = False) -> np.ndarray:
+        action = self.model.select_action(state, deterministic)
+
+        return action
+
+
+# class TranslatorEnv(Env):
+#    def __init__(self):
+#
+#        ac_low = np.array([0, 0, 0, 0, -1], dtype=np.float32)
+#        ac_high = np.array([1, 1, 1, 1, 1], dtype=np.float32)
+#        ob_low = np.array([-1, -1], dtype=np.float32)
+#        ob_high = np.array([1, 1], dtype=np.float32)
+#
+#        self.action_space = spaces.Box(low=ac_low, high=ac_high, dtype=np.float32)
+#        self.observation_space = spaces.Box(low=ob_low, high=ob_high, dtype=np.float32)
+#
+#        self.state = None
+#
+#
+#    def reset(self):
+#        """Reset environment"""
+#        super().reset()
+#
+#        self.state = np.zeros(
+#            self.observation_space.shape, dtype=self.observation_space.dtype
+#        )
+#
+#        info = dict()
+#
+#        return self.state, info
+#
+#    def step(self, action):
+#        """
+#        1 - Send action
+#        2 - Recieve next observation and the loss
+#
+#        Wait for an observation in observation space, and get the reward value."""
+#
+#        if self.state is None:
+#            raise ValueError("call reset() before stepping")
+#
+#
+#        # 1 - Send Action
+#
+#
+#
+#
+#
+#        # 2 - Receive State and Reward
+#
+#        reward = 0
+#        info = dict()
+#
+#        return self.state, reward, False, False, info
+#
+#    def render(self):
+#        """Return an array of pixels rendering the observation_space"""
+#        return
+#
+#    def close(self):
+#        """End environment simulation"""
+#        return

@@ -1,27 +1,39 @@
 #!/bin/python
-#
-# inspired by
-# https://github.com/furas/python-examples/blob/master/socket/basic/version-4/server.py
-#
 
 import json
 import socket
-import requests
 import argparse
 import traceback
 import threading
 import multiprocessing
-from time import time
+from queue import Empty
+from time import time, sleep
+from collections import deque
+from typing import Dict, List, Tuple
+
+import requests
+from requests.adapters import Retry, HTTPAdapter
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import matplotlib.animation as animation
+from matplotlib.gridspec import GridSpec
 
-import librosa
+from librosa import samples_to_frames, samples_to_time, frames_to_time
 
 import data_processors as dp
-from networks import LinearNetwork, VAENetwork
+from networks import LinearNetwork, VAENetwork, SACModel
 
+import torch.nn as nn
+
+matplotlib.rcParams["toolbar"] = "None"
+plt.style.use("dark_background")
+matplotlib.rcParams["axes.edgecolor"] = "#AAA"
+matplotlib.rcParams["xtick.color"] = "#AAA"
+matplotlib.rcParams["ytick.color"] = "#AAA"
+matplotlib.rcParams["text.color"] = "#AAA"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("port", type=int)
@@ -33,19 +45,18 @@ PORT = 8080
 if args.port:
     PORT = args.port
 
-STIM_ADDR = "192.168.22.107"
+STIM_ADDR = "192.168.2.9"
 
 SR = 1024
 FRAME_LENGTH = 512
 HOP_LENGTH = 128
-FR = librosa.samples_to_frames(SR, hop_length=HOP_LENGTH)
+FR = samples_to_frames(SR, hop_length=HOP_LENGTH)
 
 INPUT_MAX = 4096
-#INPUT_MAX = 1024
 
 BUFFERSIZE = 1024
 MAX_PLOT_SAMPLES = 4000
-MAX_PLOT_FRAMES = librosa.samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
+MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
 
 
 DATA_KEYS = ["data0", "data1", "data2", "data3"]
@@ -56,68 +67,69 @@ DATA_NAME_MAP = {
     "data3": "GSR",
 }
 
-AX_LIMS = {
-    "EEG": (-1, 1),
-    #"EEG": (0, 200),
-    "EOG": (-1, 1),
-    "GSR": (0, INPUT_MAX),
-    "heart": (0, INPUT_MAX),
-}
+UPDATE_TIME = 1
 
-t_sr = librosa.samples_to_time(np.arange(MAX_PLOT_SAMPLES) - MAX_PLOT_SAMPLES, sr=SR)
-t_f = librosa.frames_to_time(
-    np.arange(MAX_PLOT_FRAMES) - MAX_PLOT_FRAMES, sr=SR, hop_length=HOP_LENGTH
-)
+t_sr = samples_to_time(np.arange(-MAX_PLOT_SAMPLES, 0), sr=SR)
+t_f = frames_to_time(np.arange(-MAX_PLOT_FRAMES, 0), sr=SR, hop_length=HOP_LENGTH)
 
 processors = {
     "EEG": dp.ProcessorList(
         dp.RecordProcessor(sr=SR, fn=f"eeg_raw_{SR}hz.txt"),
-        dp.NormaliseProcessor(sr=SR, inrange=(0, INPUT_MAX), max_hist=MAX_PLOT_SAMPLES*16),
-        #dp.RecordProcessor(sr=SR, fn=f"eeg_norm_{SR}hz.txt"),
+        dp.NormaliseProcessor(
+            sr=SR, inrange=(0, INPUT_MAX), max_hist=MAX_PLOT_SAMPLES * 16
+        ),
+        # dp.RecordProcessor(sr=SR, fn=f"eeg_norm_{SR}hz.txt"),
         dp.FilterProcessor(sr=SR, Wn=(25, 45), btype="bandpass"),
-        #dp.RecordProcessor(sr=SR, fn=f"eeg_filtered_{SR}hz.txt"),
+        # dp.RecordProcessor(sr=SR, fn=f"eeg_filtered_{SR}hz.txt"),
         dp.RMSProcessor(sr=SR, frame_length=FRAME_LENGTH, hop_length=HOP_LENGTH),
-        #dp.RecordProcessor(sr=SR, fn=f"eeg_rms_{SR}hz.txt"),
+        # dp.RecordProcessor(sr=SR, fn=f"eeg_rms_{SR}hz.txt"),
+        dp.RescaleProcessor(sr=FR, in_range=(0, 1), out_range=(-1, 1)),
     ),
     "EOG": dp.ProcessorList(
-        dp.NormaliseProcessor(sr=SR, inrange=(0, INPUT_MAX), max_hist=MAX_PLOT_SAMPLES),
+        # dp.NormaliseProcessor(sr=SR, inrange=(0, INPUT_MAX), max_hist=MAX_PLOT_SAMPLES),
+        dp.RescaleProcessor(sr=SR, in_range=(0, INPUT_MAX), out_range=(-1, 1))
     ),
-    "GSR": dp.ProcessorList(),
-    "heart": dp.ProcessorList(),
+    "GSR": dp.ProcessorList(
+        dp.RescaleProcessor(sr=SR, in_range=(0, INPUT_MAX), out_range=(-1, 1))
+    ),
+    "heart": dp.ProcessorList(
+        dp.RescaleProcessor(sr=SR, in_range=(0, INPUT_MAX), out_range=(-1, 1))
+    ),
 }
 
 feature_extractors = {
     "EEG": dp.FeatureExtractorCollection(
-        dp.MeanFeature(sr=FR, units="frames", period=FR),
-        dp.DeltaFeature(sr=FR, units="frames", period=FR),
+        dp.MeanFeature(sr=FR, units="frames", period=UPDATE_TIME * FR),
+        dp.DeltaFeature(sr=FR, units="frames", period=UPDATE_TIME * FR),
     ),
     "EOG": dp.FeatureExtractorCollection(
-        dp.PeakActivityFeature(sr=SR, units="samples", period=SR),
+        dp.PeakActivityFeature(sr=SR, units="samples", period=UPDATE_TIME * SR),
     ),
     "GSR": dp.FeatureExtractorCollection(
-        dp.MeanFeature(sr=SR, units="samples", period=SR),
-        dp.DeltaFeature(sr=SR, units="samples", period=SR),
+        dp.MeanFeature(sr=SR, units="samples", period=UPDATE_TIME * SR),
+        dp.DeltaFeature(sr=SR, units="samples", period=UPDATE_TIME * SR),
     ),
     "heart": dp.FeatureExtractorCollection(
-        dp.StdDevFeature(sr=SR, units="samples", period=SR),
+        dp.StdDevFeature(sr=SR, units="samples", period=UPDATE_TIME * SR),
     ),
 }
 
-last_feature_time = 0
-last_output_time = 0
 
-data_units = {
+DATA_UNITS = {
     "data0": "frames",
     "data1": "samples",
     "data2": "samples",
-    "data3": "samples"
+    "data3": "samples",
 }
 
-fig, axes = plt.subplots(4, sharex=True)
+AX_LIMS = {
+    "EEG": (-1.1, 1.1),
+    "EOG": (-1.1, 1.1),
+    "GSR": (-1.1, 1.1),
+    "heart": (-1.1, 1.1),
+}
 
-data = dict()
-threads = []
-connections = dict()
+CMAP = matplotlib.cm.get_cmap("rainbow")
 
 FEATURE_VECTOR_MAP = [
     "EEG:mean",
@@ -130,17 +142,38 @@ FEATURE_VECTOR_MAP = [
     "heart:std",
 ]
 
-OUTPUT_VECTOR = ["ampl", "freq", "durn", "idly"]
+OUTPUT_VECTOR = ["ampl", "freq", "durn", "idly", "temp1", "temp2"]
 
 OUTPUT_VECTOR_RANGES = {
-    "ampl": [0, 12],
+    "ampl": [3, 12],
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],
+    "temp1": [-1, 1],
+    "temp2": [-1, 1],
 }
 
+
+################################################
+#    complete this address book!
+#    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
+
+i2c_ADDRESSES = {
+    "C4:4F:33:65:DA:79": (26, 1, 0),  # ESP 0
+    "3C:61:05:D1:87:EF": (26, 2, 1),  # ESP 1
+    "AA:BB:CC:DD:EE:F2": (30, 1, 2),  # ESP 2
+    "AA:BB:CC:DD:EE:F3": (30, 2, 3),  # ESP 3
+    "AA:BB:CC:DD:EE:F4": (34, 1, 4),  # ESP 4
+    "AA:BB:CC:DD:EE:F5": (34, 2, 5),  # ESP 5
+    "AA:BB:CC:DD:EE:F6": (38, 1, 6),  # ESP 6
+    "AA:BB:CC:DD:EE:F7": (38, 2, 7),  # ESP 7
+}
+
+################################################
+
+
 embedder_params = {
-    "feature_size": 8, 
+    "feature_size": 8,
     "hidden_size": [16, 8],
     "latent_size": 2,
 }
@@ -150,193 +183,525 @@ decision_params = {
     "batchnorm": True,
 }
 
-
-embedderNetwork = VAENetwork(embedder_params)
-interpretterNetwork = LinearNetwork(decision_params)
-
-
-def get_request(url):
-    res = requests.get(url)
-    if not res.ok:
-        print(url, "returned status", res.status_code)
-
-
-def makeFeatureVector(features):
-    x = [features.get(f, 0) for f in FEATURE_VECTOR_MAP]
-    x = np.array(x)
-
-    return x
-
-def sendOutput(host, y):
-    global last_output_time
-
-    now = time()
-    if now - last_output_time < 4.0:
-        return
-
-    last_output_time = now
-
-    if host not in connections:
-        print(host, "not in connections")
-        print(connections)
-        return
-
-    chan = connections[host] + 1
-    url = f'http://{STIM_ADDR}/enab/{chan}/1'
-    print(url)
-    t = threading.Thread(target=send_output, args=(url,))
-    t.start()
-
-    for i, name in enumerate(OUTPUT_VECTOR):
-        val = y[i]
-        r = OUTPUT_VECTOR_RANGES[name]
-        val = val * (r[1] - r[0]) + r[0]
-
-        url = f'http://{STIM_ADDR}/{name}/{chan}/{int(val)}'
-        print(url)
-        t = threading.Thread(target=send_output, args=(url,))
-        t.start()
-
-        #send_output(url)
-
-    url = f'http://{STIM_ADDR}/stim/{chan}/{4}'
-    print(url)
-    t = threading.Thread(target=send_output, args=(url,))
-    t.start()
-    #send_output(url)
+translator_params = {
+    "state_dim": embedder_params["latent_size"],
+    "action_dim": len(OUTPUT_VECTOR),
+    "gamma": 0.99,
+    "hid_shape": (12, 12),
+    "a_lr": 0.0001,
+    "c_lr": 0.0001,
+    "batch_size": 1,
+    "alpha": 0.12,
+    "adaptive_alpha": False,
+}
 
 
-def collect(q):
-    if q.empty():
-        return
+class Translator(multiprocessing.Process):
+    def __init__(
+        self,
+        sensor_q: multiprocessing.Queue,
+        plot_q: multiprocessing.Queue,
+        embedder_params: Dict,
+        decision_params: Dict,
+        translator_params: Dict,
+    ):
 
-    while not q.empty():
-        (host, port), values_dict = q.get()
-        if host not in connections:
-            connections[host] = len(connections)
+        super(Translator, self).__init__()
+        self.sensor_q = sensor_q
+        self.plot_q = plot_q
 
-        if host not in data:
-            data[host] = dict()
-            for dk in DATA_KEYS:
-                name = DATA_NAME_MAP[dk]
-                if data_units[dk] == "samples":
-                    data[host][name] = np.zeros(MAX_PLOT_SAMPLES)
-                else:
-                    data[host][name] = np.zeros(MAX_PLOT_FRAMES)
+        self.last_feature_time = 0
+        self.last_output_time = dict()
 
-        for dk in DATA_KEYS:
-            if dk not in values_dict:
-                continue
-            values = values_dict[dk]
-            name = DATA_NAME_MAP[dk]
-            if data_units[dk] == "samples":
-                max_hist = MAX_PLOT_SAMPLES
+        self.embedderNetwork = VAENetwork(embedder_params)
+        self.interpretterNetwork = LinearNetwork(decision_params)
+
+        self.translator = SACModel(**translator_params)
+
+        self.sensor_data = dict()
+        self.feature_vectors = dict()
+        self.output_vectors = dict()
+        self.map = dict()
+
+        self.running = multiprocessing.Event()
+
+        self.connections = dict()
+        self.mac_adderesses = dict()
+
+        self.t = 0
+
+        print("Translator init done")
+
+    @staticmethod
+    def makeFeatureVector(features) -> np.ndarray:
+        x = [features.get(f, 0) for f in FEATURE_VECTOR_MAP]
+        x = np.array(x)
+
+        return x
+
+    def postOutput(self, host, y):
+        if host not in self.last_output_time:
+            self.last_output_time[host] = 0
+
+        if host not in self.connections:
+            print(host, "not in connections")
+            return
+
+        now = time()
+        if now - self.last_output_time[host] < 4.0:
+            return
+
+        self.last_output_time[host] = now
+
+        # host_id = self.connections[host]
+
+        try:
+            mac = self.mac_adderesses[host]
+        except KeyError:
+            print(host, "unknown / not registered host")
+            return
+
+        try:
+            addr, chan, _ = i2c_ADDRESSES[mac]
+        except KeyError:
+            print(mac, "not assigned")
+            return
+
+        url = f"http://{STIM_ADDR}/stim"
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "channel": chan,
+            "addr": addr,
+        }
+
+        temp_url = f"http://{host}/temp"
+        temp_data = {}
+
+        for i, name in enumerate(OUTPUT_VECTOR):
+            val = np.clip(y[i], -1, 1)
+
+            if name in ("temp1", "temp2"):
+                temp_data[name.lower()] = val
             else:
-                max_hist = MAX_PLOT_FRAMES
-            data[host][name] = np.concatenate([data[host][name], values])[-max_hist:]
+                r = OUTPUT_VECTOR_RANGES[name]
+                out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
+                data[name.lower()] = out
 
-    getFeatures()
+        print(data)
+        t1 = threading.Thread(target=post_request, args=(url, headers, data, 0.5))
+        t1.start()
+
+        print(temp_data)
+        t2 = threading.Thread(
+            target=post_request, args=(temp_url, headers, temp_data, 2.0)
+        )
+        t2.start()
+
+    def collect(self):
+        while True:
+            try:
+                (host, port), values_dict = self.sensor_q.get(block=False)
+            except Empty:
+                break
+
+            if "mac" in values_dict:
+                mac = values_dict["mac"]
+                if host not in self.mac_adderesses:
+                    self.mac_adderesses[host] = mac
+
+            if host not in self.connections:
+                self.connections[host] = len(self.connections)
+
+            if host not in self.sensor_data:
+                self.sensor_data[host] = dict()
+                for dk in DATA_KEYS:
+                    name = DATA_NAME_MAP[dk]
+                    if DATA_UNITS[dk] == "samples":
+                        self.sensor_data[host][name] = np.zeros(MAX_PLOT_SAMPLES)
+                    else:
+                        self.sensor_data[host][name] = np.zeros(MAX_PLOT_FRAMES)
+
+            for dk in DATA_KEYS:
+                if dk not in values_dict:
+                    continue
+                values = values_dict[dk]
+                name = DATA_NAME_MAP[dk]
+                if DATA_UNITS[dk] == "samples":
+                    max_hist = MAX_PLOT_SAMPLES
+                else:
+                    max_hist = MAX_PLOT_FRAMES
+                self.sensor_data[host][name] = np.concatenate(
+                    [self.sensor_data[host][name], values]
+                )[-max_hist:]
+
+        plot_data = {
+            "sensors": self.sensor_data,
+        }
+        self.plot_q.put(plot_data)
+
+    def getFeatures(self):
+        now = time()
+        if now - self.last_feature_time < UPDATE_TIME:
+            return
+
+        self.last_feature_time = now
+
+        for host in self.sensor_data.keys():
+            features = dict()
+            for name in DATA_NAME_MAP.values():
+                buffer = self.sensor_data[host][name]
+                result = feature_extractors[name](buffer)
+                for k, v in result.items():
+                    f_name = name + ":" + k
+                    features[f_name] = v
+
+            # EMBED SENSORS
+            x = self.makeFeatureVector(features)
+            if host not in self.feature_vectors:
+                self.feature_vectors[host] = deque(maxlen=8)
+            self.feature_vectors[host].append(x)
+
+            z = self.embedderNetwork(x)
+            if host not in self.map:
+                self.map[host] = deque(maxlen=8)
+            self.map[host].append(z)
+
+            # MAKE ACCTION
+            # action `a` \in [-1, 1]^n
+            if len(self.map[host]) > 2:
+                # previous state...
+                state = self.map[host][-2]
+                # ...and previous actions...
+                action = self.output_vectors[host][-2]
+                # ...led to this state z...
+                # ...and recieves the reward:
+                reward = -np.linalg.norm(z)
+
+                self.translator.add(state, action, reward, z, False)
+
+            # get next action
+            deterministic = False
+            if host in self.output_vectors and len(self.output_vectors[host]) > 2:
+                deterministic = True
+            a = self.translator.get_action(z, deterministic)
+
+            # y = self.interpretterNetwork(z)[0]
+            self.postOutput(host, a)
+
+            if host not in self.output_vectors:
+                self.output_vectors[host] = deque(maxlen=8)
+            self.output_vectors[host].append(a)
+
+        plot_data = {
+            "map": self.map.copy(),
+            "feature_vectors": self.feature_vectors.copy(),
+            "output_vectors": self.output_vectors.copy(),
+            "embedder_losses": self.embedderNetwork.losses,
+            "translator_losses": self.translator.losses,
+        }
+        self.plot_q.put(plot_data)
+        print("-----------")
+
+    def run(self):
+        self.running.set()
+        while self.running.is_set():
+            try:
+                self.collect()
+                self.getFeatures()
+                sleep(0.2)
+            except KeyboardInterrupt:
+                self.running.clear()
+
+    def join(self, timeout=1):
+        print("Translator join()")
+        self.running.clear()
+        super(Translator, self).join(timeout)
 
 
-def getFeatures():
-    global last_feature_time
-
-    now = time()
-    if now - last_feature_time < 1.0:
-        return
-    last_feature_time = now
-
-    all_features = dict()
-
-    for host in data.keys():
-        features = dict()
-        for name in DATA_NAME_MAP.values():
-            buffer = data[host][name]
-            result = feature_extractors[name](buffer)
-            for k, v in result.items():
-                f_name = name + ":" + k
-                features[f_name] = v
-
-        all_features[host] = features
-
-    for host in all_features.keys():
-        x = makeFeatureVector(all_features[host])
-        #print(x)
-        z = embedderNetwork(x)
-        #print(z, z.shape)
-
-        y = interpretterNetwork(z)[0]
-        print(y, y.shape)
-        sendOutput(host, y)
-
-    print("-----------")
-
-
-def send_output(url):
-    headers = {
-        "Connection": "close",
-    }
+def post_request(url, headers, data, timeout=1.0):
     try:
-        res = requests.get(url, headers=headers, timeout=0.5)
-    except requests.exceptions.ConnectTimeout:
+        session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5)
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("http://", adapter)
+        res = session.post(url, json=data, headers=headers, timeout=timeout)
+    except requests.exceptions.RequestException as e:
+        print("POST request error to", url)
+        print(e)
         return
 
-    if not res.ok:
-        print(f"request {url} returned {r.status_code}")
     res.close()
 
 
-def animate(i, q):
-    global axes, data
+class Plotter:
+    def __init__(self, plot_q):
+        self.plot_q = plot_q
 
-    collect(q)
+        self.fig = plt.figure()
+        self.gs = GridSpec(4, 3, width_ratios=[1, 2, 2])
+        self.gs.tight_layout(self.fig)
 
-    for ax in axes:
-        ax.clear()
+        self.sensor_axes = [
+            self.fig.add_subplot(self.gs[0, 0]),
+            self.fig.add_subplot(self.gs[1, 0]),
+            self.fig.add_subplot(self.gs[2, 0]),
+            self.fig.add_subplot(self.gs[3, 0]),
+        ]
 
-    for i, (dk, ax) in enumerate(zip(DATA_KEYS, axes)):
-        name = DATA_NAME_MAP[dk]
-        for host in data.keys():
+        for dk, ax in zip(DATA_KEYS, self.sensor_axes):
+            name = DATA_NAME_MAP[dk]
+            ax.set_ylim(*AX_LIMS[name])
+            ax.set_xlim(-4, 0)
+            ax.set_title(name)
 
-            #ax.hline(0, color="black", lw=1, ls="--")
-            if data_units[dk] == "samples":
-                ax.plot(t_sr, data[host][name], label=host, lw=1)
+        self.map_ax = self.fig.add_subplot(self.gs[:2, 1:])
+        self.embed_loss_ax = self.fig.add_subplot(self.gs[2, 1])
+        self.trans_loss_ax = self.fig.add_subplot(self.gs[2, 2])
+        self.feat_vector_ax = self.fig.add_subplot(self.gs[3, 1])
+        self.out_vector_ax = self.fig.add_subplot(self.gs[3, 2])
+
+        self.map_ax.set_title("map")
+        self.map_ax.set_ylim(-1.1, 1.1)
+        self.map_ax.set_xlim(-1.1, 1.1)
+        self.map_ax.set_xticks([])
+        self.map_ax.set_yticks([])
+
+        self.embed_loss_ax.set_title("embedding loss")
+        self.embed_loss_ax.set_xlim(0, 16)
+        self.embed_loss_ax.set_xticks([])
+        self.trans_loss_ax.set_title("translator loss")
+        self.trans_loss_ax.set_xlim(0, 16)
+        self.trans_loss_ax.set_xticks([])
+
+        self.feat_vector_ax.set_title("feature vector")
+        self.feat_vector_ax.set_xticks([])
+        self.feat_vector_ax.set_yticks(np.arange(len(FEATURE_VECTOR_MAP)))
+        self.feat_vector_ax.set_yticklabels(FEATURE_VECTOR_MAP)
+
+        self.out_vector_ax.set_title("output vector")
+        self.out_vector_ax.set_xticks([])
+        self.out_vector_ax.set_yticks(np.arange(len(OUTPUT_VECTOR)))
+        self.out_vector_ax.set_yticklabels(OUTPUT_VECTOR)
+
+        self.plot_data = {
+            "sensors": dict(),
+            "map": dict(),
+            "feature_vectors": dict(),
+            "output_vectors": dict(),
+            "embedder_losses": [],
+            "translator_losses": {
+                "a_losses": [],
+                "q_losses": [],
+            },
+        }
+
+        self.lines = self.plot_data.copy()
+
+        em_l = Line2D([], [], color="white")
+        self.lines["embedder_losses"] = em_l
+        self.embed_loss_ax.add_line(em_l)
+
+        a_l = Line2D([], [], color="orange")
+        self.lines["translator_losses"]["a_losses"] = a_l
+        self.trans_loss_ax.add_line(a_l)
+        q_l = Line2D([], [], color="aqua")
+        self.lines["translator_losses"]["q_losses"] = q_l
+        self.trans_loss_ax.add_line(q_l)
+
+        feature_mat = np.zeros((1, len(FEATURE_VECTOR_MAP)))
+        f_mat_show = self.feat_vector_ax.imshow(feature_mat.T, vmin=0, vmax=100)
+        # self.feat_vector_ax.set_xlim(0, 8)
+        self.lines["feature_vectors"] = f_mat_show
+
+        output_mat = np.zeros((1, len(OUTPUT_VECTOR_RANGES)))
+        o_mat_show = self.out_vector_ax.imshow(output_mat.T, vmin=-1, vmax=1)
+        # self.out_vector_ax.set_xlim(0, 8)
+        self.lines["output_vectors"] = o_mat_show
+
+        self.colors = dict()
+
+    def animate(self, num: int) -> List[Line2D]:
+        """
+        plot_data:
+          - 'sensors'
+              - <host>
+                  - 'EEG' = np.ndarray
+                  - 'EOG' = np.ndarray
+                  - 'GSR' = np.ndarray
+                  - 'heart' = np.ndarray
+          - 'map'
+              - <host> = list
+          - 'feature_vectors'
+              - <host> = list
+          - 'output_vectors'
+              - <host> = list
+          - 'training_losses'
+              - 'embedding' = list
+              - 'intrepretter' = list
+              - 'translator'
+                - 'a_loss' = list
+                - 'q_loss' = list
+        """
+
+        all_lines = []
+        updated = False
+
+        while True:
+            try:
+                plot_data = self.plot_q.get(block=False)
+                self.plot_data.update(plot_data)
+                updated = True
+            except Empty:
+                break
+
+        if not updated:
+            return all_lines
+
+        # --------------- SENSORS ----------------
+        for dk, ax in zip(DATA_KEYS, self.sensor_axes):
+            # if "sensors" not in plot_data:
+            #    break
+
+            name = DATA_NAME_MAP[dk]
+            for host in self.plot_data["sensors"].keys():
+                buffers = self.plot_data["sensors"][host][name]
+
+                t = t_f
+                if DATA_UNITS[dk] == "samples":
+                    t = t_sr
+
+                if host not in self.colors:
+                    c = CMAP(len(self.colors) / 8)
+                    self.colors[host] = c
+
+                if host not in self.lines["sensors"]:
+                    self.lines["sensors"][host] = dict()
+
+                if name not in self.lines["sensors"][host]:
+                    l = Line2D(
+                        t, buffers, linewidth=1, alpha=0.5, color=self.colors[host]
+                    )
+                    self.lines["sensors"][host][name] = l
+                    ax.add_line(l)
+                else:
+                    self.lines["sensors"][host][name].set_data(t, buffers)
+
+                all_lines.append(self.lines["sensors"][host][name])
+
+        # --------------- MAP ----------------
+        for host in self.plot_data["map"].keys():
+            # if "map" not in plot_data:
+            #    break
+
+            m = np.stack(self.plot_data["map"][host])
+            xs = m[:, 0]
+            ys = m[:, 1]
+
+            if host not in self.lines["map"]:
+                l = Line2D(xs, ys, color=self.colors[host])
+                self.lines["map"][host] = l
+                self.map_ax.add_line(l)
             else:
-                ax.plot(t_f, data[host][name], label=host, lw=1)
+                self.lines["map"][host].set_data(xs, ys)
+
+            all_lines.append(self.lines["map"][host])
+
+        # --------------- FEATURES ----------------
+        # if "feature_vectors" in plot_data:
+        fvs = self.plot_data["feature_vectors"]
+        feature_mat = np.zeros((8, len(FEATURE_VECTOR_MAP)))
+        for i, host in enumerate(self.colors.keys()):
+            if host in fvs and len(fvs[host]) > 0:
+                fv = fvs[host][-1]
+                feature_mat[i] = fv
+
+        if len(feature_mat):
+            # print(feature_mat)
+            # self.lines["feature_vectors"].set_data(feature_mat.T)
+            # self.feat_vector_ax.set_xlim(0, 8)
+            self.feat_vector_ax.matshow(feature_mat.T, vmin=-1, vmax=20)
+
+        # if "output_vectors" in plot_data:
+        ovs = self.plot_data["output_vectors"]
+        output_mat = np.zeros((8, len(OUTPUT_VECTOR)))
+        for i, host in enumerate(self.colors.keys()):
+            if host in fvs and len(ovs[host]) > 0:
+                ov = ovs[host][-1]
+                output_mat[i] = ov
+
+        if len(output_mat):
+            # self.lines["output_vectors"].set_data(output_mat.T)
+            # self.out_vector_ax.set_xlim(0, 8)
+            self.out_vector_ax.matshow(output_mat.T, vmin=-1, vmax=1)
+
+        # --------------- LOSSES ----------------
+        # if "embedder_losses" in plot_data:
+        em_losses = self.plot_data["embedder_losses"]
+        if em_losses:
+            self.lines["embedder_losses"].set_data(np.arange(len(em_losses)), em_losses)
+            all_lines.append(self.lines["embedder_losses"])
+            self.embed_loss_ax.set_ylim(0, np.max(em_losses) * 1.1)
+
+        # if "translator_losses" in plot_data:
+        a_losses = self.plot_data["translator_losses"]["a_losses"]
+        q_losses = self.plot_data["translator_losses"]["q_losses"]
+
+        if a_losses:
+            self.lines["translator_losses"]["a_losses"].set_data(
+                np.arange(len(a_losses)), a_losses
+            )
+            all_lines.append(self.lines["translator_losses"]["a_losses"])
+            self.lines["translator_losses"]["q_losses"].set_data(
+                np.arange(len(q_losses)), q_losses
+            )
+            all_lines.append(self.lines["translator_losses"]["q_losses"])
+            upper = max(np.max(a_losses), np.max(q_losses))
+            lower = min(np.min(a_losses), np.min(q_losses))
+            self.trans_loss_ax.set_ylim(
+                lower - abs(0.1 * lower),
+                upper + abs(0.1 * upper),
+            )
+
+        self.fig.canvas.draw()
+
+        return all_lines
 
 
-        ax.set_ylim(*AX_LIMS[name])
-        if len(data) > 0 and i == 0:
-            ax.legend(loc="upper right")
-        ax.set_title(name)
+def plot(plot_q: multiprocessing.Queue):
+    pltr = Plotter(plot_q)
 
-
-def plot(q):
-    ani = animation.FuncAnimation(fig, animate, fargs=(q,), interval=250)
-    plt.show()
+    try:
+        ani = animation.FuncAnimation(pltr.fig, pltr.animate, interval=250, blit=True)
+        plt.tight_layout()
+        plt.show()
+    except KeyboardInterrupt:
+        print("plot KeyboardInterrupt")
+        return
 
 
 def handle_client(q, conn, addr):
     try:
         with conn:
-            print()
-            print("*" * 20)
+            print("\n", "*" * 20)
             print(f"made connection to {addr}")
-            print("*" * 20)
-            print()
-            #connections[addr[0]] = len(connections)
+            print("*" * 20, "\n")
             data = b""
             while True:
                 msg = conn.recv(BUFFERSIZE)
                 data = data + msg
-                if "#" not in msg.decode("ascii"):
+                data_decoded = msg.decode("ascii")
+                if "#" not in data_decoded:
                     continue
 
                 lines = data.decode("ascii").split("#")
                 for line in lines[:-1]:
                     values = processBuffer(line)
                     for dk, v in values.items():
-                        name = DATA_NAME_MAP[dk]
+                        try:
+                            name = DATA_NAME_MAP[dk]
+                        except KeyError:
+                            continue
+
                         if name not in processors:
                             continue
 
@@ -354,22 +719,28 @@ def handle_client(q, conn, addr):
 
 
 def processBuffer(data):
-    #print(data)
     try:
         values = json.loads(data)
         return values
     except Exception as e:
+        # print(e)
         return {"data0": [], "data1": [], "data2": [], "data3": []}
 
 
-def server(q):
+def server(sensor_q):
+    """
+    Listens for new TCP connections and starts a new thread for each
+    sensor ESP.
+    """
     print("starting server thread...")
+
+    threads = []
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind((HOST, PORT))
         except OSError:
-            print(HOST, PORT, "already bound...")
+            print(f"## server port {PORT} already bound...")
             s.close()
             return
 
@@ -381,43 +752,90 @@ def server(q):
             while True:
                 conn, addr = s.accept()
 
-                t = threading.Thread(target=handle_client, args=(q, conn, addr))
+                t = threading.Thread(target=handle_client, args=(sensor_q, conn, addr))
                 t.start()
                 threads.append(t)
 
         except KeyboardInterrupt:
-            for t in threads:
-                t.join()
-
+            print("server KeyboardInterrupt")
+            for t in thread:
+                t.join(0.2)
             s.close()
+            return
 
 
 def lighthouse():
+    """
+    Listens for sensor ESPs UDP broadcasts and echos messages to estamblish
+    Port and IP of server
+    """
     print("starting lighthouse")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         try:
             s.bind(("", PORT))
             print("lighthouse started on", PORT)
         except OSError:
-            print(PORT, "already bound...")
+            print(f"#### lighthouse port {PORT} already bound...")
             s.close()
             return
 
-        while True:
-            msg, addr = s.recvfrom(BUFFERSIZE)
-            #if msg == b"HH":
-            s.sendto(msg, addr)
+        try:
+            while True:
+                msg, (host, port) = s.recvfrom(BUFFERSIZE)
+                mac = msg.decode("utf-8")
+                mac = mac.replace("\r", "")
+                mac = mac.replace("\n", "")
+                print(f"MAC Address found: {mac} from '{host}'")
+
+                ##if mac not in i2c_ADDRESSES:
+                ##    print(" === Unassigned device (not found in i2c_ADDRESSES)")
+
+                ##mac_adderesses[host] = mac
+                s.sendto(b"lighthouse", (host, port))
+
+        except KeyboardInterrupt:
+            print("lighthouse KeyboardInterrupt")
+            return
 
 
 def main():
-    q = multiprocessing.Queue()
+    # raw sensor data is collected by 'handle_client' threads and sent
+    # to the Translator over 'sensor_q'
+    sensor_q = multiprocessing.Queue()
 
-    server_process = multiprocessing.Process(None, server, args=(q,))
+    # data to be plotted is added to the 'plot_q' by the Translator
+    plot_q = multiprocessing.Queue()
+
+    # Translator processes sensor data and makes stimulator outputs
+    translator = Translator(
+        sensor_q, plot_q, embedder_params, decision_params, translator_params
+    )
+    translator.start()
+
+    # server process listens to new connections from ESPs
+    server_process = multiprocessing.Process(None, server, args=(sensor_q,))
     server_process.start()
+
+    # lighthouse_process echos ESPs broadcast messages to establish
+    # connections
     lighthouse_process = multiprocessing.Process(None, lighthouse)
     lighthouse_process.start()
-    plot(q)
-    print("finished setup")
+
+    # start plotting of data
+    print("starting plot")
+    plot(plot_q)
+
+    print("finishing")
+
+    server_process.join(0.2)
+    lighthouse_process.join(0.2)
+    translator.join(0.2)
+
+    print("\nDONE")
+
+    print(translator.is_alive())
+    print(server_process.is_alive())
+    print(lighthouse_process.is_alive())
 
 
 if __name__ == "__main__":
