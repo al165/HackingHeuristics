@@ -159,14 +159,14 @@ OUTPUT_VECTOR_RANGES = {
 #    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
 
 i2c_ADDRESSES = {
-    "C4:4F:33:65:DA:79": (26, 1, 0),  # ESP 0
-    "3C:61:05:D1:87:EF": (26, 2, 1),  # ESP 1
-    "AA:BB:CC:DD:EE:F2": (30, 1, 2),  # ESP 2
-    "AA:BB:CC:DD:EE:F3": (30, 2, 3),  # ESP 3
-    "AA:BB:CC:DD:EE:F4": (34, 1, 4),  # ESP 4
-    "AA:BB:CC:DD:EE:F5": (34, 2, 5),  # ESP 5
-    "AA:BB:CC:DD:EE:F6": (38, 1, 6),  # ESP 6
-    "AA:BB:CC:DD:EE:F7": (38, 2, 7),  # ESP 7
+    "C4:4F:33:65:DA:79": (0, 1, 0),  # ESP 0
+    "3C:61:05:D1:87:EF": (0, 2, 1),  # ESP 1
+    "AA:BB:CC:DD:EE:F2": (1, 1, 2),  # ESP 2
+    "AA:BB:CC:DD:EE:F3": (1, 2, 3),  # ESP 3
+    "AA:BB:CC:DD:EE:F4": (2, 1, 4),  # ESP 4
+    "AA:BB:CC:DD:EE:F5": (2, 2, 5),  # ESP 5
+    "AA:BB:CC:DD:EE:F6": (3, 1, 6),  # ESP 6
+    "AA:BB:CC:DD:EE:F7": (3, 2, 7),  # ESP 7
 }
 
 ################################################
@@ -253,8 +253,6 @@ class Translator(multiprocessing.Process):
 
         self.last_output_time[host] = now
 
-        # host_id = self.connections[host]
-
         try:
             mac = self.mac_adderesses[host]
         except KeyError:
@@ -264,7 +262,7 @@ class Translator(multiprocessing.Process):
         try:
             addr, chan, _ = i2c_ADDRESSES[mac]
         except KeyError:
-            print(mac, "not assigned")
+            print(mac, "not assigned!")
             return
 
         url = f"http://{STIM_ADDR}/stim"
