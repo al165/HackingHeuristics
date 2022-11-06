@@ -11,6 +11,15 @@
 WiFiManager wm;
 WebServer server(80);
 
+
+void TCA9548A(uint8_t bus) {
+  Wire.beginTransmission(0x70);  // TCA9548A address
+  Wire.write(1 << bus);          // send byte to select bus
+  Wire.endTransmission();
+  Serial.print(bus);
+}
+
+
 void setStimulation() {
   String postBody = server.arg("plain");
   Serial.println("--------");
@@ -31,25 +40,19 @@ void setStimulation() {
   bool success = false;
   int last_error = 0;
 
-  if (!postObj.containsKey("channel")) {
-    Serial.println("incomplete JSON: missing 'channel'");
-    server.send(400, F("text/html"), "body missing `channel`");
+  if (!postObj.containsKey("channel") || !postObj.containsKey("addr")) {
+    Serial.println("incomplete JSON: missing 'channel' or 'addr'");
+    server.send(400, F("text/html"), "body missing `channel` or 'addr'");
     return;
   }
 
   uint8_t channel = postObj["channel"];
+  uint8_t addr = postObj["addr"];
+  
+  TCA9548A(addr);
 
   server.send(201, F("text/html"), "ok");
 
-  if (postObj.containsKey("addr")) {
-    int val = postObj["addt"];
-    last_error = setAddress(val, 0);
-    Serial.println(last_error);
-
-    if (last_error == 0) {
-      success = true;
-    }
-  }
 
   if (postObj.containsKey("ampl")) {
     int val = postObj["ampl"];
@@ -91,14 +94,8 @@ void setStimulation() {
     }
   }
 
-//  if (success) {
-    enable(channel, 1);
-    startStimulation(channel, 4);
-    
-//  } else {
-//    server.send(400, F("text/html"), "error");
-//  }
-
+  enable(channel, 1);
+  startStimulation(channel, 4);
 
 }
 
@@ -122,7 +119,6 @@ void setup() {
   });
 
   server.on(F("/stim"), HTTP_POST, setStimulation);
-
   server.begin();
 }
 
