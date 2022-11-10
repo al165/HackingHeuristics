@@ -1,7 +1,6 @@
-import os
 import sys
 from collections import deque
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 
@@ -10,9 +9,8 @@ import torch
 # from gymnasium import Env, spaces
 
 sys.path.append("..")
-from models import LinearVAE, SimpleNetwork
-
 from sac import SAC_Agent
+from models import LinearVAE, SimpleNetwork
 
 
 class Translator:
@@ -24,16 +22,20 @@ class Translator:
 
 
 class VAENetwork:
-    def __init__(self, model_params: Dict[str, float], saved_model: str = None):
+    def __init__(
+        self,
+        model_params: Dict[str, float],
+        saved_model: str = None,
+    ):
 
         self.model_params = model_params
         self.model = LinearVAE(**model_params)
 
-        self.training_data = []
+        self.training_data: List[torch.Tensor] = []
         self.batch = 0
 
         self.lr = 0.0001
-        self.losses = deque(maxlen=16)
+        self.losses: deque = deque(maxlen=16)
 
         self.optimiser = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = torch.nn.MSELoss(reduction="mean")
@@ -81,13 +83,17 @@ class VAENetwork:
 
 
 class LinearNetwork:
-    def __init__(self, model_params: Dict[str, float], saved_model: str = None):
+    def __init__(
+        self,
+        model_params: Dict[str, float],
+        saved_model: str = None,
+    ):
 
         self.model_params = model_params
         self.model = SimpleNetwork(**model_params)
         self.model.eval()
 
-        self.batch = []
+        self.batch: List[torch.Tensor] = []
 
         self.lr = 0.001
 
@@ -118,8 +124,8 @@ class LinearNetwork:
         loss.backward()
         self.optimiser.step()
 
-        #print(" -- Training results:")
-        #print(f" -- loss: {loss.item()}")
+        # print(" -- Training results:")
+        # print(f" -- loss: {loss.item()}")
 
         self.batch = []
 
@@ -161,7 +167,11 @@ class Buffer:
 
 class SACModel:
     def __init__(
-        self, train_every: int = 8, batch_size: int = 16, device: str = "cpu", **kwargs
+        self,
+        train_every: int = 8,
+        batch_size: int = 16,
+        device: str = "cpu",
+        **kwargs,
     ):
 
         print(kwargs)
@@ -174,7 +184,7 @@ class SACModel:
 
         self.n = 0
 
-        self.losses = {
+        self.losses: Dict[str, deque] = {
             "a_losses": deque(maxlen=16),
             "q_losses": deque(maxlen=16),
         }
@@ -197,66 +207,23 @@ class SACModel:
             self.losses["q_losses"].append(q_loss)
             self.n = 0
 
-    def get_action(self, state: np.ndarray, deterministic: bool = False) -> np.ndarray:
+    def get_action(
+        self,
+        state: np.ndarray,
+        deterministic: bool = False,
+    ) -> np.ndarray:
+        """
+        Parameters
+        ----------
+        state : np.ndarray
+        deterministic : bool
+
+        Returns
+        -------
+        action : np.ndarray
+            Action parameter, each in interval (-1, 1)
+        """
+
         action = self.model.select_action(state, deterministic)
 
         return action
-
-
-# class TranslatorEnv(Env):
-#    def __init__(self):
-#
-#        ac_low = np.array([0, 0, 0, 0, -1], dtype=np.float32)
-#        ac_high = np.array([1, 1, 1, 1, 1], dtype=np.float32)
-#        ob_low = np.array([-1, -1], dtype=np.float32)
-#        ob_high = np.array([1, 1], dtype=np.float32)
-#
-#        self.action_space = spaces.Box(low=ac_low, high=ac_high, dtype=np.float32)
-#        self.observation_space = spaces.Box(low=ob_low, high=ob_high, dtype=np.float32)
-#
-#        self.state = None
-#
-#
-#    def reset(self):
-#        """Reset environment"""
-#        super().reset()
-#
-#        self.state = np.zeros(
-#            self.observation_space.shape, dtype=self.observation_space.dtype
-#        )
-#
-#        info = dict()
-#
-#        return self.state, info
-#
-#    def step(self, action):
-#        """
-#        1 - Send action
-#        2 - Recieve next observation and the loss
-#
-#        Wait for an observation in observation space, and get the reward value."""
-#
-#        if self.state is None:
-#            raise ValueError("call reset() before stepping")
-#
-#
-#        # 1 - Send Action
-#
-#
-#
-#
-#
-#        # 2 - Receive State and Reward
-#
-#        reward = 0
-#        info = dict()
-#
-#        return self.state, reward, False, False, info
-#
-#    def render(self):
-#        """Return an array of pixels rendering the observation_space"""
-#        return
-#
-#    def close(self):
-#        """End environment simulation"""
-#        return

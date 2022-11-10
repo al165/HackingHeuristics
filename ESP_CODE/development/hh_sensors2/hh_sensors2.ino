@@ -20,7 +20,7 @@ const int SENSOR3 = A0;  // GSR
 #include <ArduinoJson.h>
 #include <WiFiClient.h>
 
-#include <strings_en.h>
+//#include <strings_en.h>
 #include <WiFiManager.h>
 
 #include <WiFiUdp.h>
@@ -54,7 +54,14 @@ String mac;
 #define BIN1 26
 #define BIN2 27
 
+// Temperature update time
+const long TEMP_UPDATE = 5000000;
+// Temperature "on" time
+const long TEMP_ON = 2000000;
 
+long lastTempTime = 0;
+long tempOffTime = 0;
+bool tempOn = false;
 
 void setTemp() {
   String postBody = server.arg("plain");
@@ -72,10 +79,16 @@ void setTemp() {
     return;
   }
 
+  // check if should ignore...
+  if (micros() - lastTempTime < TEMP_UPDATE) {
+    server.send(201);
+    return;
+  }
+
   JsonObject postObj = doc.as<JsonObject>();
 
   bool success = false;
-  
+
   if (postObj.containsKey("temp1")) {
     success = true;
     float temp = postObj["temp1"];
@@ -84,22 +97,22 @@ void setTemp() {
       // make warm...
       Serial.println("warming up 1");
 
-      digitalWrite(AIN2,LOW);
-      digitalWrite(AIN1,HIGH); 
-      
+      digitalWrite(AIN2, LOW);
+      digitalWrite(AIN1, HIGH);
+
     } else if (temp < -0.2) {
       // make cold...
       Serial.println("cooling down 1");
 
-      digitalWrite(AIN1,LOW);
-      digitalWrite(AIN2,HIGH); 
-      
+      digitalWrite(AIN1, LOW);
+      digitalWrite(AIN2, HIGH);
+
     } else {
       // turn off...
       Serial.println("turning off 1");
 
-      digitalWrite(AIN1,LOW);
-      digitalWrite(AIN2,LOW); 
+      digitalWrite(AIN1, LOW);
+      digitalWrite(AIN2, LOW);
     }
   }
 
@@ -111,30 +124,42 @@ void setTemp() {
       // make warm...
       Serial.println("warming up 2");
 
-      digitalWrite(BIN2,LOW);
-      digitalWrite(BIN1,HIGH); 
+      digitalWrite(BIN2, LOW);
+      digitalWrite(BIN1, HIGH);
 
     } else if (temp < -0.2) {
       // make cold...
       Serial.println("cooling down 2");
 
-      digitalWrite(BIN2,LOW);
-      digitalWrite(BIN1,HIGH); 
+      digitalWrite(BIN2, LOW);
+      digitalWrite(BIN1, HIGH);
 
     } else {
       // turn off...
       Serial.println("turning off 2");
-      
-      digitalWrite(BIN2,LOW);
-      digitalWrite(BIN1,HIGH); 
+
+      digitalWrite(BIN2, LOW);
+      digitalWrite(BIN1, LOW);
     }
   }
 
-  if(success){
+  if (success) {
+    lastTempTime = micros();
+    tempOffTime = lastTempTime + TEMP_ON;
+    tempOn = true;
     server.send(201);
   } else {
     server.send(400, F("text/html"), "neither temp1 or temp2 specified");
   }
+}
+
+void turnTempsOff() {
+  digitalWrite(AIN2, LOW);
+  digitalWrite(AIN1, LOW);
+  digitalWrite(BIN2, LOW);
+  digitalWrite(BIN1, LOW);
+
+  tempOn = false;
 }
 
 void setup() {
@@ -164,7 +189,7 @@ void setup() {
   // listen for temperature changes
   server.on(F("/temp"), HTTP_POST, setTemp);
   server.begin();
-  
+
   // get unique ID
   byte baseMac[6];
   WiFi.macAddress(baseMac);
@@ -187,7 +212,7 @@ void setup() {
 }
 
 void loop() {
-  
+
   // check if broadcast has been accepted
   int packetSize = UDP.parsePacket();
   if (packetSize) {
@@ -238,6 +263,10 @@ void loop() {
   static long timer = 0;
   timer -= interval;
 
+  if(tempOn && (present > tempOffTime)){
+    turnTempsOff();
+  }
+
   if (timer >= 0) {
     return;
   }
@@ -285,7 +314,7 @@ void loop() {
 
     // send data packet:
     client.print(json);
-//    Serial.println(json);
+    //    Serial.println(json);
 
     // reset data streams:
     data0 = "";

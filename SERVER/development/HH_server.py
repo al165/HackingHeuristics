@@ -372,7 +372,7 @@ class Translator(multiprocessing.Process):
                 # ...and previous actions...
                 action = self.output_vectors[host][-2]
                 # ...led to this state z...
-                # ...and recieves the reward:
+                # ...and so recieves the reward:
                 reward = -np.linalg.norm(z)
 
                 self.translator.add(state, action, reward, z, False)
@@ -382,6 +382,8 @@ class Translator(multiprocessing.Process):
             if host in self.output_vectors and len(self.output_vectors[host]) > 2:
                 deterministic = True
             a = self.translator.get_action(z, deterministic)
+            # amplify output:
+            a = np.tanh(a * 5)
 
             # y = self.interpretterNetwork(z)[0]
             self.postOutput(host, a)
@@ -541,7 +543,7 @@ class Plotter:
                 - 'q_loss' = list
         """
 
-        all_lines = []
+        all_lines: List[Line2D] = []
         updated = False
 
         while True:
@@ -576,11 +578,15 @@ class Plotter:
                     self.lines["sensors"][host] = dict()
 
                 if name not in self.lines["sensors"][host]:
-                    l = Line2D(
-                        t, buffers, linewidth=1, alpha=0.5, color=self.colors[host]
+                    line = Line2D(
+                        t,
+                        buffers,
+                        linewidth=1,
+                        alpha=0.5,
+                        color=self.colors[host],
                     )
-                    self.lines["sensors"][host][name] = l
-                    ax.add_line(l)
+                    self.lines["sensors"][host][name] = line
+                    ax.add_line(line)
                 else:
                     self.lines["sensors"][host][name].set_data(t, buffers)
 
@@ -596,9 +602,9 @@ class Plotter:
             ys = m[:, 1]
 
             if host not in self.lines["map"]:
-                l = Line2D(xs, ys, color=self.colors[host])
-                self.lines["map"][host] = l
-                self.map_ax.add_line(l)
+                line = Line2D(xs, ys, color=self.colors[host])
+                self.lines["map"][host] = line
+                self.map_ax.add_line(line)
             else:
                 self.lines["map"][host].set_data(xs, ys)
 
@@ -636,7 +642,10 @@ class Plotter:
         # if "embedder_losses" in plot_data:
         em_losses = self.plot_data["embedder_losses"]
         if em_losses:
-            self.lines["embedder_losses"].set_data(np.arange(len(em_losses)), em_losses)
+            self.lines["embedder_losses"].set_data(
+                np.arange(len(em_losses)),
+                em_losses,
+            )
             all_lines.append(self.lines["embedder_losses"])
             self.embed_loss_ax.set_ylim(0, np.max(em_losses) * 1.1)
 
@@ -669,10 +678,16 @@ def plot(plot_q: multiprocessing.Queue):
     pltr = Plotter(plot_q)
 
     try:
-        ani = animation.FuncAnimation(pltr.fig, pltr.animate, interval=250, blit=True)
+        ani = animation.FuncAnimation(
+            pltr.fig,
+            pltr.animate,
+            interval=250,
+            blit=True,
+        )
         plt.tight_layout()
         plt.show()
     except KeyboardInterrupt:
+        ani.pause()
         print("plot KeyboardInterrupt")
         return
 
@@ -721,7 +736,7 @@ def processBuffer(data):
         values = json.loads(data)
         return values
     except Exception as e:
-        # print(e)
+        print(e)
         return {"data0": [], "data1": [], "data2": [], "data3": []}
 
 
@@ -750,13 +765,16 @@ def server(sensor_q):
             while True:
                 conn, addr = s.accept()
 
-                t = threading.Thread(target=handle_client, args=(sensor_q, conn, addr))
+                t = threading.Thread(
+                    target=handle_client,
+                    args=(sensor_q, conn, addr),
+                )
                 t.start()
                 threads.append(t)
 
         except KeyboardInterrupt:
             print("server KeyboardInterrupt")
-            for t in thread:
+            for t in threads:
                 t.join(0.2)
             s.close()
             return
