@@ -1,5 +1,6 @@
 #!/bin/python
 
+import os
 import json
 import socket
 import argparse
@@ -8,12 +9,14 @@ import threading
 import multiprocessing
 from queue import Empty
 from time import time, sleep
+from datetime import datetime
 from collections import deque
 from typing import Dict, List, Tuple
 
 import requests
 from requests.adapters import Retry, HTTPAdapter
 
+import torch
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -28,6 +31,8 @@ from networks import LinearNetwork, VAENetwork, SACModel
 
 import torch.nn as nn
 
+from config import i2c_ADDRESSES, STIM_ADDR, CHECKPOINT_INTERVAL, CHECKPOINT_PATH
+
 matplotlib.rcParams["toolbar"] = "None"
 plt.style.use("dark_background")
 matplotlib.rcParams["axes.edgecolor"] = "#AAA"
@@ -37,6 +42,7 @@ matplotlib.rcParams["text.color"] = "#AAA"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("port", type=int)
+parser.add_argument("load", action="store_true")
 
 args = parser.parse_args()
 
@@ -45,9 +51,7 @@ PORT = 8080
 if args.port:
     PORT = args.port
 
-STIM_ADDR = "192.168.2.9"
-
-SR = 1024
+SR = 512
 FRAME_LENGTH = 512
 HOP_LENGTH = 128
 FR = samples_to_frames(SR, hop_length=HOP_LENGTH)
@@ -142,7 +146,7 @@ FEATURE_VECTOR_MAP = [
     "heart:std",
 ]
 
-OUTPUT_VECTOR = ["ampl", "freq", "durn", "idly", "temp1", "temp2"]
+OUTPUT_VECTOR = ["ampl", "freq", "durn", "idly", "temp1", "temp2", "indicate"]
 
 OUTPUT_VECTOR_RANGES = {
     "ampl": [3, 12],
@@ -152,24 +156,6 @@ OUTPUT_VECTOR_RANGES = {
     "temp1": [-1, 1],
     "temp2": [-1, 1],
 }
-
-
-################################################
-#    complete this address book!
-#    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
-
-i2c_ADDRESSES = {
-    "C4:4F:33:65:DA:79": (0, 1, 0),  # ESP 0
-    "3C:61:05:D1:87:EF": (0, 2, 1),  # ESP 1
-    "AA:BB:CC:DD:EE:F2": (1, 1, 2),  # ESP 2
-    "AA:BB:CC:DD:EE:F3": (1, 2, 3),  # ESP 3
-    "AA:BB:CC:DD:EE:F4": (2, 1, 4),  # ESP 4
-    "AA:BB:CC:DD:EE:F5": (2, 2, 5),  # ESP 5
-    "AA:BB:CC:DD:EE:F6": (3, 1, 6),  # ESP 6
-    "AA:BB:CC:DD:EE:F7": (3, 2, 7),  # ESP 7
-}
-
-################################################
 
 
 embedder_params = {
@@ -184,7 +170,8 @@ decision_params = {
 }
 
 translator_params = {
-    "state_dim": embedder_params["latent_size"],
+    "state_dim": embedder_params["latent_size"]
+    * 2,  # current location + target location
     "action_dim": len(OUTPUT_VECTOR),
     "gamma": 0.99,
     "hid_shape": (12, 12),
@@ -204,6 +191,7 @@ class Translator(multiprocessing.Process):
         embedder_params: Dict,
         decision_params: Dict,
         translator_params: Dict,
+        load_latest: bool = False,
     ):
 
         super(Translator, self).__init__()
@@ -213,22 +201,24 @@ class Translator(multiprocessing.Process):
         self.last_feature_time = 0
         self.last_output_time = dict()
 
-        self.embedderNetwork = VAENetwork(embedder_params)
-        self.interpretterNetwork = LinearNetwork(decision_params)
+        self.last_checkpoint_time = time()
 
+        self.embedderNetwork = VAENetwork(embedder_params)
         self.translator = SACModel(**translator_params)
 
         self.sensor_data = dict()
         self.feature_vectors = dict()
         self.output_vectors = dict()
         self.map = dict()
+        self.targets = deque(maxlen=8)
 
         self.running = multiprocessing.Event()
 
         self.connections = dict()
         self.mac_adderesses = dict()
 
-        self.t = 0
+        if load_latest:
+            self.loadLatest()
 
         print("Translator init done")
 
@@ -239,7 +229,15 @@ class Translator(multiprocessing.Process):
 
         return x
 
-    def postOutput(self, host, y):
+    def getCenter(self) -> np.ndarray:
+        """Returns the coordinate of the center of mass of all the points"""
+        positions = []
+        for host, hist in self.map.items():
+            positions.append(hist[-1])
+
+        return np.mean(positions, axis=0)
+
+    def postOutput(self, host: str, y: np.ndarray, reward: float = -10):
         if host not in self.last_output_time:
             self.last_output_time[host] = 0
 
@@ -256,13 +254,16 @@ class Translator(multiprocessing.Process):
         try:
             mac = self.mac_adderesses[host]
         except KeyError:
-            print(host, "unknown / not registered host")
+            print(
+                host,
+                "unknown / not registered host (has not registered with this server, restart that ESP?)",
+            )
             return
 
         try:
             addr, chan, _ = i2c_ADDRESSES[mac]
         except KeyError:
-            print(mac, "not assigned!")
+            print(mac, "not assigned! (make sure it is specified in `config.py`)")
             return
 
         url = f"http://{STIM_ADDR}/stim"
@@ -275,6 +276,11 @@ class Translator(multiprocessing.Process):
         temp_url = f"http://{host}/temp"
         temp_data = {}
 
+        indicate_url = f"http://{host}/indicate"
+        indicate_data = {"indicate": False}
+        if -reward < 0.1:
+            indicate_data["indicate"] = True
+
         for i, name in enumerate(OUTPUT_VECTOR):
             val = np.clip(y[i], -1, 1)
 
@@ -285,15 +291,26 @@ class Translator(multiprocessing.Process):
                 out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
                 data[name.lower()] = out
 
-        print(data)
-        t1 = threading.Thread(target=post_request, args=(url, headers, data, 0.5))
+        # print(data)
+        t1 = threading.Thread(
+            target=post_request,
+            args=(url, headers, data, 0.5),
+        )
         t1.start()
 
-        print(temp_data)
+        # print(temp_data)
         t2 = threading.Thread(
-            target=post_request, args=(temp_url, headers, temp_data, 2.0)
+            target=post_request,
+            args=(temp_url, headers, temp_data, 2.0),
         )
         t2.start()
+
+        print(indicate_data)
+        t3 = threading.Thread(
+            target=post_request,
+            args=(indicate_url, headers, indicate_data, 0.5),
+        )
+        t3.start()
 
     def collect(self):
         while True:
@@ -344,6 +361,9 @@ class Translator(multiprocessing.Process):
 
         self.last_feature_time = now
 
+        target = self.getCenter()
+        self.targets.append(target)
+
         for host in self.sensor_data.keys():
             features = dict()
             for name in DATA_NAME_MAP.values():
@@ -364,16 +384,16 @@ class Translator(multiprocessing.Process):
                 self.map[host] = deque(maxlen=8)
             self.map[host].append(z)
 
-            # MAKE ACCTION
+            # MAKE ACTION
             # action `a` \in [-1, 1]^n
             if len(self.map[host]) > 2:
-                # previous state...
-                state = self.map[host][-2]
+                # previous state of position and target...
+                state = np.concatenate(self.map[host][-2], self.target[-2])
                 # ...and previous actions...
                 action = self.output_vectors[host][-2]
                 # ...led to this state z...
                 # ...and so recieves the reward:
-                reward = -np.linalg.norm(z)
+                reward = -np.linalg.norm(z - target)
 
                 self.translator.add(state, action, reward, z, False)
 
@@ -386,7 +406,7 @@ class Translator(multiprocessing.Process):
             a = np.tanh(a * 5)
 
             # y = self.interpretterNetwork(z)[0]
-            self.postOutput(host, a)
+            self.postOutput(host, a, reward)
 
             if host not in self.output_vectors:
                 self.output_vectors[host] = deque(maxlen=8)
@@ -394,11 +414,13 @@ class Translator(multiprocessing.Process):
 
         plot_data = {
             "map": self.map.copy(),
+            "target": target,
             "feature_vectors": self.feature_vectors.copy(),
             "output_vectors": self.output_vectors.copy(),
             "embedder_losses": self.embedderNetwork.losses,
             "translator_losses": self.translator.losses,
         }
+
         self.plot_q.put(plot_data)
         print("-----------")
 
@@ -408,14 +430,51 @@ class Translator(multiprocessing.Process):
             try:
                 self.collect()
                 self.getFeatures()
+                if time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL:
+                    self.save()
                 sleep(0.2)
             except KeyboardInterrupt:
                 self.running.clear()
 
     def join(self, timeout=1):
         print("Translator join()")
+        self.save()
         self.running.clear()
         super(Translator, self).join(timeout)
+
+    def save(self):
+        print("saving checkpoints")
+        SAC_state_dicts = self.translator.save()
+        embedder_state_dict = self.embedderNetwork.state_dict()
+
+        data = {
+            "sac": SAC_state_dicts,
+            "embedder": embedder_state_dict,
+        }
+
+        fn = datetime.now().strftime("%Y%m%d_%H%M%S.pth")
+        torch.save(data, os.path.join([CHECKPOINT_PATH, fn]))
+
+        self.last_checkpoint_time = time()
+
+    def load(self, path: str):
+        try:
+            data = torch.load(path)
+        except FileNotFoundError:
+            print(f"{path} does not exist. Cannot load models.")
+            return
+
+        self.translator.load(data["sac"])
+        self.embedderNetwork.load_state_dict(data["embedder"])
+
+    def loadLatest(self):
+        files = list(sorted(os.listdir(CHECKPOINT_PATH)))
+        if len(files) == 0:
+            print(f"No checkpoints found in {CHECKPOINT_PATH}")
+            return
+
+        latest_path = os.path.join(CHECKPOINT_PATH, files[-1])
+        self.load(latest_path)
 
 
 def post_request(url, headers, data, timeout=1.0):
@@ -434,7 +493,7 @@ def post_request(url, headers, data, timeout=1.0):
 
 
 class Plotter:
-    def __init__(self, plot_q):
+    def __init__(self, plot_q, minimal: bool = False):
         self.plot_q = plot_q
 
         self.fig = plt.figure()
@@ -620,9 +679,6 @@ class Plotter:
                 feature_mat[i] = fv
 
         if len(feature_mat):
-            # print(feature_mat)
-            # self.lines["feature_vectors"].set_data(feature_mat.T)
-            # self.feat_vector_ax.set_xlim(0, 8)
             self.feat_vector_ax.matshow(feature_mat.T, vmin=-1, vmax=20)
 
         # if "output_vectors" in plot_data:
@@ -824,7 +880,12 @@ def main():
 
     # Translator processes sensor data and makes stimulator outputs
     translator = Translator(
-        sensor_q, plot_q, embedder_params, decision_params, translator_params
+        sensor_q,
+        plot_q,
+        embedder_params,
+        decision_params,
+        translator_params,
+        load_latest=args.load,
     )
     translator.start()
 

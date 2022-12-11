@@ -1,4 +1,5 @@
 #if defined(ESP32)
+// ------- ESP32 constants ---------------------
 #include <WiFi.h>
 #include <WebServer.h>
 WebServer server(80);
@@ -6,7 +7,13 @@ const int SENSOR0 = 34;  // EEG
 const int SENSOR1 = 32;  // EOG
 const int SENSOR2 = 39;  // heart rate sensor
 const int SENSOR3 = 36;  // GSR
+// Temperature Pins:
+#define AIN1 13
+#define AIN2 12
+#define BIN1 26
+#define BIN2 27
 #else
+// ------- ESP8266 constants -------------------
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 ESP8266WebServer server(80);
@@ -14,18 +21,22 @@ const int SENSOR0 = A0;  // EEG
 const int SENSOR1 = A0;  // EOG
 const int SENSOR2 = A0;  // heart rate sensor
 const int SENSOR3 = A0;  // GSR
+// Temperature Pins :
+#define AIN1 4
+#define AIN2 5
+#define BIN1 12
+#define BIN2 13
+// ----------------------------------------------
 #endif
-
 
 #include <ArduinoJson.h>
 #include <WiFiClient.h>
-
-//#include <strings_en.h>
 #include <WiFiManager.h>
 
 #include <WiFiUdp.h>
 
 WiFiManager wm;
+// IP Address of computer running HH_server.py:
 IPAddress host(192, 168, 2, 8);
 const unsigned int PORT = 8080;
 const unsigned int PORT_RANGE = 10;
@@ -33,26 +44,23 @@ unsigned int currentPort = PORT;
 
 WiFiClient client;
 
+// Stores the sensor readings
 String data0 = "";
 String data1 = "";
 String data2 = "";
 String data3 = "";
 
 const int DATA_LENGTH = 64;
-const int SAMPLE_RATE = 1024;
+const int SAMPLE_RATE = 512;
 
 WiFiUDP UDP;
 char packet[255];
 const unsigned int UDP_PORT = 4210;
 
+// Unique MAC address as ID
 String mac;
 
-// Temperature Pins:
-#define AIN1 13
-#define AIN2 12
 
-#define BIN1 26
-#define BIN2 27
 
 // Temperature update time
 const long TEMP_UPDATE = 5000000;
@@ -63,7 +71,42 @@ long lastTempTime = 0;
 long tempOffTime = 0;
 bool tempOn = false;
 
-void setTemp() {
+// proximity indicator pin(s)
+#define IND1 32
+
+
+JsonObject getPostBody() {
+  /*
+   * Reads and parses latest POST Json body
+   */
+   
+  String postBody = server.arg("plain");
+  Serial.println("--------\nPostBody:");
+  Serial.println(postBody);
+
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, postBody);
+
+  if (error) {
+    Serial.print(F("Error parsing JSON "));
+    Serial.println(error.c_str());
+
+    doc["ok"] = false;
+  } else {
+    doc["ok"] = true;
+  }
+
+  JsonObject postObj = doc.as<JsonObject>();
+  Serial.println(postObj);
+  return postObj;
+}
+
+void updateOutput() {
+  /*
+   * Updates the host's outputs (Highlight, and 2 temp stimulators)
+   */
+   
+//  JsonObject postObj = getPostBody();
   String postBody = server.arg("plain");
   Serial.println("--------");
   Serial.println(postBody);
@@ -75,21 +118,40 @@ void setTemp() {
     Serial.print(F("Error parsing JSON "));
     Serial.println(error.c_str());
 
-    server.send(400, F("text/html"), "Error in parsing JSON body");
-    return;
-  }
-
-  // check if should ignore...
-  if (micros() - lastTempTime < TEMP_UPDATE) {
-    server.send(201);
-    return;
+    doc["ok"] = false;
+  } else {
+    doc["ok"] = true;
   }
 
   JsonObject postObj = doc.as<JsonObject>();
 
+  if(!postObj["ok"]){
+    server.send(400, F("text/html"), "Error in parsing JSON body\n");
+    return;
+  }
+
   bool success = false;
 
-  if (postObj.containsKey("temp1")) {
+  // Update highlight status:
+  if(postObj.containsKey("highlight")){
+    success = true;
+    if(postObj["highlight"]){
+      Serial.println("highlight TRUE");
+      digitalWrite(IND1, HIGH);
+    } else {
+      Serial.println("highlight FALSE");
+      digitalWrite(IND1, LOW);
+    }
+  }
+
+
+  // check if should ignore temps...
+  bool ignoreTemp = false;
+  if (micros() - lastTempTime < TEMP_UPDATE) {
+    ignoreTemp = true;
+  }
+
+  if (postObj.containsKey("temp1") && !ignoreTemp) {
     success = true;
     float temp = postObj["temp1"];
 
@@ -116,7 +178,7 @@ void setTemp() {
     }
   }
 
-  if (postObj.containsKey("temp2")) {
+  if (postObj.containsKey("temp2") && !ignoreTemp) {
     success = true;
     float temp = postObj["temp2"];
 
@@ -149,11 +211,14 @@ void setTemp() {
     tempOn = true;
     server.send(201);
   } else {
-    server.send(400, F("text/html"), "neither temp1 or temp2 specified");
+    server.send(400, F("text/html"), "neither temp1, temp2 or hightlight specified\n");
   }
 }
 
 void turnTempsOff() {
+  /*
+   * Turn all temperature stimulators off.
+   */
   digitalWrite(AIN2, LOW);
   digitalWrite(AIN1, LOW);
   digitalWrite(BIN2, LOW);
@@ -168,9 +233,10 @@ void setup() {
 
   pinMode(AIN1, OUTPUT);
   pinMode(AIN2, OUTPUT);
-
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
+
+  pinMode(IND1, OUTPUT);
 
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, LOW);
@@ -187,14 +253,18 @@ void setup() {
   Serial.println(" done");
 
   // listen for temperature changes
-  server.on(F("/temp"), HTTP_POST, setTemp);
+  server.on(F("/update"), HTTP_POST, updateOutput);
   server.begin();
 
   // get unique ID
   byte baseMac[6];
   WiFi.macAddress(baseMac);
   char baseMacChr[18] = {0};
-  sprintf(baseMacChr, "%02X:%02X:%02X:%02X:%02X:%02X", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
+  sprintf(
+    baseMacChr, 
+    "%02X:%02X:%02X:%02X:%02X:%02X", 
+    baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]
+  );
   mac = String(baseMacChr);
 
   Serial.print("MacAddress: ");
@@ -212,6 +282,7 @@ void setup() {
 }
 
 void loop() {
+  server.handleClient();
 
   // check if broadcast has been accepted
   int packetSize = UDP.parsePacket();
@@ -231,28 +302,15 @@ void loop() {
       Serial.println(currentPort);
       Serial.println();
     } else {
-      Serial.print("Could not connect to Gateway IP ");
-      Serial.print(host);
-      Serial.print(":");
-      Serial.println(currentPort);
-      Serial.println();
-
-      Serial.print("checking ports ");
       for (int i = 0; i < PORT_RANGE; i++) {
         UDP.beginPacket("255.255.255.255", PORT + i);
         UDP.println(mac);
         UDP.endPacket();
-        Serial.print(PORT + i);
-        Serial.print(", ");
       }
-      Serial.println();
       delay(500);
       return;
     }
-
   }
-
-  server.handleClient();
 
   // calculate elapsed time
   static unsigned long past = 0;
