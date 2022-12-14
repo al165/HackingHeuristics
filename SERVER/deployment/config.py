@@ -5,9 +5,9 @@ STIM_ADDR = "192.168.0.100"
 #    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
 
 i2c_ADDRESSES = {
-    "C4:4F:33:65:DA:79": (0x1A, 1, 0),  # ESP 0
+    "E8:DB:84:C5:C2:B5": (0x1A, 1, 0),  # ESP 0
     "3C:61:05:D1:87:EF": (0x1A, 2, 1),  # ESP 1
-    "AA:BB:CC:DD:EE:F2": (0x1B, 1, 2),  # ESP 2
+    "84:F3:EB:18:3A:25": (0x1B, 1, 2),  # ESP 2
     "AA:BB:CC:DD:EE:F3": (0x1B, 2, 3),  # ESP 3
     "24:6F:28:83:66:50": (0x1C, 1, 4),  # ESP 4
     "AA:BB:CC:DD:EE:F5": (0x1C, 2, 5),  # ESP 5

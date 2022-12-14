@@ -1,3 +1,5 @@
+import json
+import traceback
 from queue import Empty
 from typing import List, Dict, Tuple
 
@@ -35,6 +37,44 @@ AX_LIMS = {
 }
 
 
+def external_plotter(plot_q, host: str = "127.0.0.1", port: int = 3334):
+    from pythonosc import udp_client
+
+    client = udp_client.SimpleUDPClient(host, port)
+    last_strs = dict()
+
+    try:
+        while True:
+            data = plot_q.get(block=True)
+
+            if "agents" in data:
+                for host, agent in data["agents"].items():
+                    agent.sensor_data = None
+                    agent.map = [x.tolist() for x in agent.map]
+                    agent.feature_vectors = [
+                        x.tolist() for x in list(agent.feature_vectors)
+                    ]
+                    agent.output_vectors = [
+                        x.tolist() for x in list(agent.output_vectors)
+                    ]
+
+                    data_str = agent.to_json()
+
+                    if host in last_strs and data_str == last_strs[host]:
+                        continue
+
+                    client.send_message("/agent", data_str)
+                    last_strs[host] = data_str
+
+            if "center" in data:
+                center = {"x": float(data["center"][0]), "y": float(data["center"][1])}
+                client.send_message("/center", json.dumps(center))
+
+    except Exception as e:
+        traceback.print_exc()
+        print(e)
+
+
 class MinPlotter:
     def __init__(self, plot_q):
         self.plot_q = plot_q
@@ -50,7 +90,9 @@ class MinPlotter:
         self.agents = dict()
         self.colors = dict()
 
-        self.lines = dict()
+        self.lines = {
+            "map": dict(),
+        }
 
     def animate(self, num: int) -> List[Line2D]:
         all_lines: List[Line2D] = list()
@@ -58,13 +100,17 @@ class MinPlotter:
 
         while True:
             try:
-                agent = self.plot_q.get(block=False)
+                agents = self.plot_q.get(block=False)
                 # self.plot_data.update(plot_data)
-                id = agent.id
-                if id not in self.agents:
+                # self.agents.update(agents)
+
+                for agent in agents.values():
+                    id = agent["id"]
                     self.agents[id] = agent
-                    c = CMAP(len(self.colors) / 8)
-                    self.colors[id] = c
+                    if id not in self.colors:
+                        c = CMAP(len(self.colors) / 8)
+                        self.colors[id] = c
+
                 updated = True
             except Empty:
                 break
@@ -73,9 +119,11 @@ class MinPlotter:
             return all_lines
 
         for id, agent in self.agents.items():
-            m = np.stack(agent.map)
+            m = np.stack(agent["map"])
             xs = m[:, 0]
             ys = m[:, 1]
+
+            print(xs, ys)
 
             if id not in self.lines["map"]:
                 line = Line2D(xs, ys, color=self.colors[id])
@@ -89,15 +137,15 @@ class MinPlotter:
         # draw lines connecting all highlighted participants
         highlighted = []
         for id, agent in self.agents.items():
-            if agent.highlight:
+            if agent["highlight"]:
                 highlighted.append(id)
 
         for i in range(len(highlighted) - 1):
             for j in range(i + 1, len(highlighted)):
                 id1 = highlighted[i]
                 id2 = highlighted[j]
-                start = self.agents[id1].map[-1]
-                end = self.agents[id2].map[-1]
+                start = self.agents[id1]["map"][-1]
+                end = self.agents[id2]["map"][-1]
 
                 line = Line2D(
                     [start[0], end[0]],

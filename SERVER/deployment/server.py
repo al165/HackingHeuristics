@@ -12,10 +12,12 @@ from time import time, sleep
 from datetime import datetime
 from collections import deque
 from typing import Dict, List, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 import requests
 from requests.adapters import Retry, HTTPAdapter
+
+from dataclasses_json import dataclass_json, config
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,7 +31,7 @@ from networks import LinearNetwork, VAENetwork, SACModel
 import torch
 import torch.nn as nn
 
-from plotters import FullPlotter, MinPlotter
+from plotters import FullPlotter, MinPlotter, external_plotter
 
 from config import (
     i2c_ADDRESSES,
@@ -72,15 +74,14 @@ BUFFERSIZE = 1024
 MAX_PLOT_SAMPLES = 4000
 MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
 
-
-UPDATE_TIME = 1
+UPDATE_TIME = 4
 
 t_sr = samples_to_time(np.arange(-MAX_PLOT_SAMPLES, 0), sr=SR)
 t_f = frames_to_time(np.arange(-MAX_PLOT_FRAMES, 0), sr=SR, hop_length=HOP_LENGTH)
 
 processors = {
     "EEG": dp.ProcessorList(
-        dp.RecordProcessor(sr=SR, fn=f"eeg_raw_{SR}hz.txt"),
+        #dp.RecordProcessor(sr=SR, fn=f"eeg_raw_{SR}hz.txt"),
         dp.NormaliseProcessor(
             sr=SR, inrange=(0, INPUT_MAX), max_hist=MAX_PLOT_SAMPLES * 16
         ),
@@ -145,20 +146,27 @@ translator_params = {
 }
 
 
+@dataclass_json
 @dataclass
 class Agent:
     ip: str
     port: int
     mac: str
     id: int
-    map: deque = deque(maxlen=8)
+    map: deque = field(
+        default_factory=lambda: deque(maxlen=8)
+    )  # , metadata=config(encoder=list))
     active: bool = False
     highlight: bool = False
     stim_addr: int = 0x1A
     stim_chan: int = 1
     sensor_data: Dict = field(default_factory=dict)
-    feature_vectors: deque = deque(maxlen=8)
-    output_vectors: deque = deque(maxlen=8)
+    feature_vectors: deque = field(
+        default=deque(maxlen=8), metadata=config(encoder=list)
+    )
+    output_vectors: deque = field(
+        default=deque(maxlen=8), metadata=config(encoder=list)
+    )
 
     def __post_init__(self):
         self.map.append(np.array([0.0, 0.0]))
@@ -192,11 +200,18 @@ class Translator(multiprocessing.Process):
         self.running = multiprocessing.Event()
 
         self.agents = dict()  # {host: agent}
+        self.updated = False
 
         if load_latest:
             self.loadLatest()
 
         print("Translator init done")
+
+    def getActiveAgents(self) -> Dict[str, Agent]:
+        active = dict(
+            [(host, agent) for host, agent in self.agents.items() if agent.active]
+        )
+        return active
 
     @staticmethod
     def makeFeatureVector(features) -> np.ndarray:
@@ -208,12 +223,19 @@ class Translator(multiprocessing.Process):
     def getCenter(self) -> np.ndarray:
         """Returns the coordinate of the center of mass of all the points"""
         positions = []
-        for host, agent in self.agents.items():
-            positions.append(agent.map[-1])
+        for host, agent in self.getActiveAgents().items():
+            if len(agent.map) > 0:
+                positions.append(agent.map[-1])
 
-        if len(positions) == 0:
-            return np.ndarray([0, 0])
+        if len(positions) <= 1:
+            # either one agent or none, try last collective target
+            if len(self.targets) > 0:
+                return self.targets[-1]
 
+            # else return center
+            return np.array([0.0, 0.0])
+
+        # multiple active agents, use mean positions
         return np.mean(positions, axis=0)
 
     def postOutput(self, host: str, y: np.ndarray):
@@ -284,7 +306,8 @@ class Translator(multiprocessing.Process):
         )
 
         self.agents[host] = agent
-        print(f" = new agent added (ESP {id})=")
+        self.updated = True
+        print(f"** new agent added (ESP {id}) **")
 
     def collect(self):
         while True:
@@ -313,12 +336,11 @@ class Translator(multiprocessing.Process):
                     -max_hist:
                 ]
 
-            # self.agents[host].sensor_data = sensor_data
+            if "active" in values_dict:
+                # print(host, values_dict["active"])
+                self.agents[host].active = values_dict["active"]
 
-        # plot_data = {
-        #    "sensors": self.sensor_data,
-        # }
-        # self.plot_q.put(plot_data)
+            self.updated = True
 
     def getFeatures(self):
         now = time()
@@ -329,15 +351,17 @@ class Translator(multiprocessing.Process):
 
         target = self.getCenter()
 
-        for host, agent in self.agents.items():
-            agent = self.agents[host]
+        for host, agent in self.getActiveAgents().items():
             features = dict()
-            for name in DATA_NAME_MAP.values():
-                buffer = agent.sensor_data[name]
-                result = feature_extractors[name](buffer)
-                for k, v in result.items():
-                    f_name = name + ":" + k
-                    features[f_name] = v
+            try:
+                for name in DATA_NAME_MAP.values():
+                    buffer = agent.sensor_data[name]
+                    result = feature_extractors[name](buffer)
+                    for k, v in result.items():
+                        f_name = name + ":" + k
+                        features[f_name] = v
+            except KeyError:
+                continue
 
             # EMBED SENSORS
             x = self.makeFeatureVector(features)
@@ -350,7 +374,7 @@ class Translator(multiprocessing.Process):
 
             # MAKE ACTION
             # action `a` \in [-1, 1]^n
-            if len(agent.output_vectors) > 0:
+            if len(agent.output_vectors) > 0 and len(self.targets) > 0:
                 # previous state of position and target...
                 prev_state = np.concatenate([agent.map[-1], self.targets[-1]])
                 # ...and previous actions...
@@ -358,7 +382,7 @@ class Translator(multiprocessing.Process):
                 # ...led to this state z...
                 # ...and so recieves the reward:
                 reward = -np.linalg.norm(z - target)
-                agent.hightlight = reward > -0.1
+                agent.highlight = bool(reward > -0.2)
 
                 self.translator.add(prev_state, action, reward, curr_state, False)
                 deterministic = True
@@ -369,22 +393,17 @@ class Translator(multiprocessing.Process):
             agent.output_vectors.append(a)
             agent.map.append(z)
 
+            self.agents[host] = agent
             self.postOutput(host, a)
 
         self.targets.append(target)
 
-        # plot_data = {
-        #     "map": self.map.copy(),
-        #     "target": target,
-        #     "feature_vectors": self.feature_vectors.copy(),
-        #     "output_vectors": self.output_vectors.copy(),
-        #     "embedder_losses": self.embedderNetwork.losses,
-        #     "translator_losses": self.translator.losses,
-        # }
-
-        # self.plot_q.put(plot_data)
-
         print("-----------")
+
+    def updatePlotQueue(self):
+        if self.updated:
+            self.plot_q.put({"agents": self.agents, "center": self.targets[-1]})
+            self.updated = False
 
     def run(self):
         self.running.set()
@@ -392,6 +411,7 @@ class Translator(multiprocessing.Process):
             try:
                 self.collect()
                 self.getFeatures()
+                self.updatePlotQueue()
                 if time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL:
                     self.save()
                 sleep(0.2)
@@ -447,27 +467,36 @@ def post_request(url, headers, data, timeout=1.0):
         session.mount("http://", adapter)
         res = session.post(url, json=data, headers=headers, timeout=timeout)
     except requests.exceptions.RequestException as e:
-        print("POST request error to", url)
-        print(e)
+        # print("POST request error to", url)
+        # print(e)
         return
 
     res.close()
 
 
 def plot(plot_q: multiprocessing.Queue):
-    pltr = MinPlotter(plot_q)
+    # pltr = MinPlotter(plot_q)
 
     try:
-        ani = animation.FuncAnimation(
-            pltr.fig,
-            pltr.animate,
-            interval=250,
-            blit=True,
-        )
-        plt.tight_layout()
-        plt.show()
+        # ani = animation.FuncAnimation(
+        #     pltr.fig,
+        #     pltr.animate,
+        #     interval=250,
+        #     blit=True,
+        # )
+        # plt.tight_layout()
+        # plt.show()
+
+        # t = threading.Thread(
+        #    target=external_plotter,
+        #    args=(plot_q),
+        # )
+        # t.start()
+
+        external_plotter(plot_q)
+
     except KeyboardInterrupt:
-        ani.pause()
+        # ani.pause()
         print("plot KeyboardInterrupt")
         return
 
@@ -476,8 +505,8 @@ def handle_client(sensor_q, conn, addr):
     try:
         with conn:
             print("\n", "*" * 20)
-            print(f"made connection to {addr}")
-            print("*" * 20, "\n")
+            print(f" made connection to {addr}")
+            print("", "*" * 20, "\n")
             data = b""
             while True:
                 msg = conn.recv(BUFFERSIZE)
@@ -498,6 +527,10 @@ def handle_client(sensor_q, conn, addr):
                         if name not in processors:
                             continue
 
+                        if name == "GSR":
+                            active = bool(np.mean(values["data3"]) > 10)
+                            values["active"] = active
+
                         values[dk] = processors[name](np.array(v, dtype=float))
 
                     sensor_q.put((addr, values))
@@ -505,10 +538,11 @@ def handle_client(sensor_q, conn, addr):
 
     except Exception as e:
         print(f"[DEBUG] exception from {addr}")
-        traceback.print_exc()
+        # traceback.print_exc()
         print(e)
 
-        conn.close()
+    conn.close()
+    print("! handle_client disconnected!")
 
 
 def processBuffer(data):
@@ -517,7 +551,8 @@ def processBuffer(data):
         return values
     except Exception as e:
         print(e)
-        return {"data0": [], "data1": [], "data2": [], "data3": []}
+        print(data)
+        return {"data0": [], "data1": [], "data2": [], "data3": [], "active": False}
 
 
 def server(sensor_q):

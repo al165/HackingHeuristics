@@ -35,6 +35,7 @@ const int SENSOR3 = A0;  // GSR
 
 #include <WiFiUdp.h>
 
+
 WiFiManager wm;
 // IP Address of computer running HH_server.py:
 IPAddress host(192, 168, 2, 8);
@@ -60,7 +61,10 @@ const unsigned int UDP_PORT = 4210;
 // Unique MAC address as ID
 String mac;
 
-
+// Active status and timers
+bool active = true;
+long lastActivePing = 0;
+const long ACTIVE_PING = 1000000;
 
 // Temperature update time
 const long TEMP_UPDATE = 5000000;
@@ -108,8 +112,8 @@ void updateOutput() {
    
 //  JsonObject postObj = getPostBody();
   String postBody = server.arg("plain");
-  Serial.println("--------");
-  Serial.println(postBody);
+//  Serial.println("--------");
+//  Serial.println(postBody);
 
   DynamicJsonDocument doc(512);
   DeserializationError error = deserializeJson(doc, postBody);
@@ -136,10 +140,10 @@ void updateOutput() {
   if(postObj.containsKey("highlight")){
     success = true;
     if(postObj["highlight"]){
-      Serial.println("highlight TRUE");
+//      Serial.println("highlight TRUE");
       digitalWrite(IND1, HIGH);
     } else {
-      Serial.println("highlight FALSE");
+//      Serial.println("highlight FALSE");
       digitalWrite(IND1, LOW);
     }
   }
@@ -157,21 +161,21 @@ void updateOutput() {
 
     if (temp > 0.2) {
       // make warm...
-      Serial.println("warming up 1");
+//      Serial.println("warming up 1");
 
       digitalWrite(AIN2, LOW);
       digitalWrite(AIN1, HIGH);
 
     } else if (temp < -0.2) {
       // make cold...
-      Serial.println("cooling down 1");
+//      Serial.println("cooling down 1");
 
       digitalWrite(AIN1, LOW);
       digitalWrite(AIN2, HIGH);
 
     } else {
       // turn off...
-      Serial.println("turning off 1");
+//      Serial.println("turning off 1");
 
       digitalWrite(AIN1, LOW);
       digitalWrite(AIN2, LOW);
@@ -184,21 +188,21 @@ void updateOutput() {
 
     if (temp > 0.2) {
       // make warm...
-      Serial.println("warming up 2");
+//      Serial.println("warming up 2");
 
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, HIGH);
 
     } else if (temp < -0.2) {
       // make cold...
-      Serial.println("cooling down 2");
+//      Serial.println("cooling down 2");
 
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, HIGH);
 
     } else {
       // turn off...
-      Serial.println("turning off 2");
+//      Serial.println("turning off 2");
 
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, LOW);
@@ -225,6 +229,19 @@ void turnTempsOff() {
   digitalWrite(BIN1, LOW);
 
   tempOn = false;
+}
+
+void sendPing(){
+  String json = "{\"mac\":\"" + mac + "\",";
+  
+  if(active){
+    json += "\"active\":true}#";
+  } else {
+    json += "\"active\":false}#";
+  }
+
+//  Serial.println(json);
+  client.print(json);
 }
 
 void setup() {
@@ -284,10 +301,9 @@ void setup() {
 void loop() {
   server.handleClient();
 
-  // check if broadcast has been accepted
+//  bool conn = checkConnection();
   int packetSize = UDP.parsePacket();
   if (packetSize) {
-    Serial.println("recieved packet from broadcast");
     int len = UDP.read(packet, 255);
     host = UDP.remoteIP();
     currentPort = UDP.remotePort();
@@ -300,7 +316,6 @@ void loop() {
       Serial.print(host);
       Serial.print(":");
       Serial.println(currentPort);
-      Serial.println();
     } else {
       for (int i = 0; i < PORT_RANGE; i++) {
         UDP.beginPacket("255.255.255.255", PORT + i);
@@ -311,6 +326,7 @@ void loop() {
       return;
     }
   }
+  
 
   // calculate elapsed time
   static unsigned long past = 0;
@@ -325,11 +341,22 @@ void loop() {
     turnTempsOff();
   }
 
+//  if(present > lastActivePing + ACTIVE_PING){
+//    sendPing();
+//    lastActivePing = present;
+//  }
+  
   if (timer >= 0) {
     return;
   }
 
   timer += 1000000 / SAMPLE_RATE;
+
+  active = analogRead(SENSOR3) > 8;
+
+//  if(!active){
+//    return;
+//  }
 
   // Read data pins:
   static int count = 0;
@@ -367,12 +394,18 @@ void loop() {
     json += "\"data0\":[" + data0 + "],";
     json += "\"data1\":[" + data1 + "],";
     json += "\"data2\":[" + data2 + "],";
-    json += "\"data3\":[" + data3 + "]";
+    json += "\"data3\":[" + data3 + "],";
+
+    if(active){
+      json += "\"active\":true";
+    } else {
+      json += "\"active\":false";
+    }
+
     json += "}#";
 
     // send data packet:
-    client.print(json);
-    //    Serial.println(json);
+    client.println(json);
 
     // reset data streams:
     data0 = "";
@@ -382,5 +415,34 @@ void loop() {
 
     count = 0;
   }
+}
 
+bool checkConnection(){
+  // check if broadcast has been accepted
+  int packetSize = UDP.parsePacket();
+  if (packetSize) {
+    int len = UDP.read(packet, 255);
+    host = UDP.remoteIP();
+    currentPort = UDP.remotePort();
+  }
+
+  // check connection:
+  if (!client.connected()) {
+    if (client.connect(host, currentPort)) {
+      Serial.print("Connected to Gateway IP ");
+      Serial.print(host);
+      Serial.print(":");
+      Serial.println(currentPort);
+    } else {
+      for (int i = 0; i < PORT_RANGE; i++) {
+        UDP.beginPacket("255.255.255.255", PORT + i);
+        UDP.println(mac);
+        UDP.endPacket();
+      }
+      delay(500);
+      return false;
+    }
+  }
+
+  return true;
 }
