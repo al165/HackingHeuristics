@@ -7,6 +7,7 @@ const int SENSOR0 = 34;  // EEG
 const int SENSOR1 = 32;  // EOG
 const int SENSOR2 = 39;  // heart rate sensor
 const int SENSOR3 = 36;  // GSR
+const int MAX_ANALOG_INPUT = 4095;
 // Temperature Pins:
 #define AIN1 13
 #define AIN2 12
@@ -21,6 +22,7 @@ const int SENSOR0 = A0;  // EEG
 const int SENSOR1 = A0;  // EOG
 const int SENSOR2 = A0;  // heart rate sensor
 const int SENSOR3 = A0;  // GSR
+const int MAX_ANALOG_INPUT = 1023;
 // Temperature Pins :
 #define AIN1 4
 #define AIN2 5
@@ -32,9 +34,18 @@ const int SENSOR3 = A0;  // GSR
 #include <ArduinoJson.h>
 #include <WiFiClient.h>
 #include <WiFiManager.h>
-
 #include <WiFiUdp.h>
 
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define SCREEN_WIDTH 128 
+#define SCREEN_HEIGHT 64 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// proximity indicator pin(s)
+#define IND1 14
 
 WiFiManager wm;
 // IP Address of computer running HH_server.py:
@@ -75,8 +86,11 @@ long lastTempTime = 0;
 long tempOffTime = 0;
 bool tempOn = false;
 
-// proximity indicator pin(s)
-#define IND1 32
+// sensor reads
+int read0;
+int read1;
+int read2;
+int read3;
 
 
 JsonObject getPostBody() {
@@ -109,8 +123,7 @@ void updateOutput() {
   /*
    * Updates the host's outputs (Highlight, and 2 temp stimulators)
    */
-   
-//  JsonObject postObj = getPostBody();
+
   String postBody = server.arg("plain");
 //  Serial.println("--------");
 //  Serial.println(postBody);
@@ -244,6 +257,39 @@ void sendPing(){
   client.print(json);
 }
 
+void readPins(){
+  read0 = analogRead(SENSOR0);
+  read1 = analogRead(SENSOR1);
+  read2 = analogRead(SENSOR2);
+  read3 = analogRead(SENSOR3);
+}
+
+void updateScreen() {
+  display.clearDisplay();
+  
+  int maxRadius = min(display.width(), display.height());
+ 
+  int r0 = map(read0, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r1 = map(read1, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r2 = map(read2, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r3 = map(read3, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+ 
+  int x0 = 10;
+  int y0 = display.height() / 2;
+
+  int x1 = 40;
+  int x2 = 70;
+  int x3 = 100;
+
+  display.fillCircle(x0, y0,  r0, SSD1306_WHITE);
+  display.fillCircle(x1, y0,  r1, SSD1306_WHITE);
+  display.fillCircle(x2, y0,  r2, SSD1306_WHITE);
+  display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
+
+  display.display(); 
+ // delay(20);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
@@ -352,35 +398,32 @@ void loop() {
 
   timer += 1000000 / SAMPLE_RATE;
 
-  active = analogRead(SENSOR3) > 8;
+  readPins();
 
-//  if(!active){
-//    return;
-//  }
+  active = read3 > 8;
 
-  // Read data pins:
   static int count = 0;
 
   // Data0:
-  data0 += analogRead(SENSOR0);
+  data0 += read0;
   if (count < DATA_LENGTH - 1) {
     data0 += ",";
   }
 
   // Data1
-  data1 += analogRead(SENSOR1);
+  data1 += read1;
   if (count < DATA_LENGTH - 1) {
     data1 += ",";
   }
 
   // Data2
-  data2 += analogRead(SENSOR2);
+  data2 += read2;
   if (count < DATA_LENGTH - 1) {
     data2 += ",";
   }
 
   // Data3
-  data3 += analogRead(SENSOR3);
+  data3 += read3;
   if (count < DATA_LENGTH - 1) {
     data3 += ",";
   }
@@ -415,6 +458,8 @@ void loop() {
 
     count = 0;
   }
+
+  updateScreen();
 }
 
 bool checkConnection(){
