@@ -1,0 +1,6 @@
+requests
+dataclasses_json
+numpy
+matplotlib
+torch
+librosa
