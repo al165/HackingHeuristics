@@ -202,6 +202,8 @@ class Translator(multiprocessing.Process):
         self.agents = dict()  # {host: agent}
         self.updated = False
 
+        self.stim_addr = STIM_ADDR
+
         if load_latest:
             self.loadLatest()
 
@@ -254,7 +256,8 @@ class Translator(multiprocessing.Process):
 
         agent = self.agents[host]
 
-        url = f"http://{STIM_ADDR}/stim"
+        url = f"http://{self.stim_addr}/stim"
+        #print(url)
         headers = {"Content-Type": "application/json"}
         data = {
             "channel": agent.stim_chan,
@@ -315,6 +318,12 @@ class Translator(multiprocessing.Process):
                 (host, port), values_dict = self.sensor_q.get(block=False)
             except Empty:
                 break
+
+            print(values_dict)
+
+            if "stim_addr" in values_dict:
+                self.stim_addr = values_dict["stim_addr"]
+                continue
 
             if host not in self.agents:
                 mac = values_dict["mac"]
@@ -398,7 +407,7 @@ class Translator(multiprocessing.Process):
 
         self.targets.append(target)
 
-        print("-----------")
+        #print("-----------")
 
     def updatePlotQueue(self):
         if self.updated:
@@ -415,6 +424,7 @@ class Translator(multiprocessing.Process):
                 if time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL:
                     self.save()
                 sleep(0.2)
+                #print(self.stim_addr)
             except KeyboardInterrupt:
                 self.running.clear()
 
@@ -595,11 +605,12 @@ def server(sensor_q):
             return
 
 
-def lighthouse():
+def lighthouse(sensor_q):
     """
     Listens for sensor ESPs UDP broadcasts and echos messages to estamblish
     Port and IP of server
     """
+
     print("starting lighthouse")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         try:
@@ -616,6 +627,16 @@ def lighthouse():
                 mac = msg.decode("utf-8")
                 mac = mac.replace("\r", "")
                 mac = mac.replace("\n", "")
+
+                if mac == "stimulator":
+                    s.sendto(b"lighthouse", (host, port))
+                    STIM_ADDR = host
+                    print("***** STUMULATOR IP FOUND ******")
+                    print(f"****** {host} *****")
+
+                    sensor_q.put(((host, port), {"stim_addr": host}))
+                    continue
+
                 print(f"MAC Address found: {mac} from '{host}'")
 
                 ##if mac not in i2c_ADDRESSES:
@@ -654,7 +675,7 @@ def main():
 
     # lighthouse_process echos ESPs broadcast messages to establish
     # connections
-    lighthouse_process = multiprocessing.Process(None, lighthouse)
+    lighthouse_process = multiprocessing.Process(None, lighthouse, args=(sensor_q,))
     lighthouse_process.start()
 
     # start plotting of data

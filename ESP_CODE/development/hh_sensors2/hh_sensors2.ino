@@ -86,11 +86,15 @@ long lastTempTime = 0;
 long tempOffTime = 0;
 bool tempOn = false;
 
+// Screen refresh rate
+long lastDisplayTime = 0;
+const long DISPLAY_REFRESH = 200000;
+
 // sensor reads
-int read0;
-int read1;
-int read2;
-int read3;
+int read0 = 0;
+int read1 = 0;
+int read2 = 0;
+int read3 = 0;
 
 
 JsonObject getPostBody() {
@@ -294,6 +298,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
+
   pinMode(AIN1, OUTPUT);
   pinMode(AIN2, OUTPUT);
   pinMode(BIN1, OUTPUT);
@@ -391,6 +401,11 @@ void loop() {
 //    sendPing();
 //    lastActivePing = present;
 //  }
+
+  if(present > lastDisplayTime + DISPLAY_REFRESH){
+    updateScreen();
+    lastDisplayTime = present;
+  }
   
   if (timer >= 0) {
     return;
@@ -431,7 +446,7 @@ void loop() {
   count++;
 
   // Construct data packet:
-  if (count == DATA_LENGTH) {
+  if (count >= DATA_LENGTH) {
     String json = "{";
     json += "\"mac\":\"" + mac + "\",";
     json += "\"data0\":[" + data0 + "],";
@@ -459,7 +474,6 @@ void loop() {
     count = 0;
   }
 
-  updateScreen();
 }
 
 bool checkConnection(){

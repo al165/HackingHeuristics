@@ -11,15 +11,20 @@
 WiFiManager wm;
 WebServer server(80);
 
+WiFiUDP UDP;
+char packet[255];
+IPAddress host(192, 168, 178, 200);
+const unsigned int UDP_PORT = 4210;
+const unsigned int PORT = 8080;
+const unsigned int PORT_RANGE = 10;
+unsigned int currentPort = PORT;
+
+WiFiClient client;
+
+
 // Stimulator loop that continuously updates the AMP value of
 // the Neurostimduino
 TaskHandle_t Loop2;
-
-
-// TODO: make ramp state/val for all addresses and channels
-//int rampState = 0; // 0: No change  1: Ramp up   -1: Ramp down
-//int rampVal = 0;
-//int targetVal = 0;
 
 int rampStates[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int rampVals[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -30,6 +35,9 @@ int targetVals[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 long RAMP_TIME = 100000;  // 100ms
 unsigned long last_update_time = 0;
 
+
+long lastBroadcastTime = 0;
+const long BROADCAST = 5000000;
 
 
 void setStimulation() {
@@ -159,30 +167,36 @@ void setup() {
   server.on(F("/stim"), HTTP_POST, setStimulation);
   server.begin();
 
-  //  xTaskCreatePinnedToCore(
-  //    stimLoop,
-  //    "stimLoop",
-  //    1000,
-  //    NULL,
-  //    1,
-  //    &Loop2,
-  //    0
-  //  );
+  // listen for UDP packets
+  UDP.begin(UDP_PORT);
 
+  // broadcast
+  for (int i = 0; i < PORT_RANGE; i++) {
+    UDP.beginPacket("255.255.255.255", PORT + i);
+    UDP.println("stimulator");
+    UDP.endPacket();
+  }
 
 }
 
 void loop() {
   //  server.handleClient();
-  //}
-
-  //void stimLoop(void * pvParameters) {
-  Serial.print("Task1 running on core ");
-  Serial.println(xPortGetCoreID());
-
   for (;;) {
     unsigned long present = micros();
     server.handleClient();
+
+
+    if (present > lastBroadcastTime + BROADCAST) {
+      for (int i = 0; i < PORT_RANGE; i++) {
+        UDP.beginPacket("255.255.255.255", PORT + i);
+        UDP.println("stimulator");
+        UDP.endPacket();
+      }
+      lastBroadcastTime = present;
+    }
+
+
+
     if (present < last_update_time + RAMP_TIME) {
       continue;
     }

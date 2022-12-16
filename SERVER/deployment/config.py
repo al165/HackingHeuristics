@@ -1,5 +1,5 @@
 # IP Address of the ESP controlling the Stimulators
-STIM_ADDR = "192.168.0.100"
+STIM_ADDR = "192.168.178.68"
 
 # i2c Address book:
 #    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
@@ -13,6 +13,8 @@ i2c_ADDRESSES = {
     "EC:62:60:9D:2A:B0": (0x1C, 2, 5),  # ESP 5
     "24:D7:EB:14:F1:08": (0x1D, 1, 6),  # ESP 6
     "94:E6:86:03:A3:C4": (0x1D, 2, 7),  # ESP 7
+    "3C:61:05:D1:87:EF": (0x1A, 1, 0),  # DEBUG ESP 0
+    "E8:DB:84:C5:C2:B5": (0x1A, 2, 1),  # DEBUG ESP 1
 }
 
 
