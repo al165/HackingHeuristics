@@ -266,7 +266,7 @@ class Translator(multiprocessing.Process):
 
         host_url = f"http://{host}/update"
         update_data = {
-            "hightlight": agent.highlight,
+            "highlight": agent.highlight,
         }
 
         for i, name in enumerate(OUTPUT_VECTOR):
@@ -277,6 +277,10 @@ class Translator(multiprocessing.Process):
                 r = OUTPUT_VECTOR_RANGES[name]
                 out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
                 data[name.lower()] = out
+        
+        print(data)
+        print(host_url)
+        print(update_data)
 
         t1 = threading.Thread(
             target=post_request,
@@ -319,7 +323,7 @@ class Translator(multiprocessing.Process):
             except Empty:
                 break
 
-            print(values_dict)
+            #print(values_dict)
 
             if "stim_addr" in values_dict:
                 self.stim_addr = values_dict["stim_addr"]
@@ -631,8 +635,8 @@ def lighthouse(sensor_q):
                 if mac == "stimulator":
                     s.sendto(b"lighthouse", (host, port))
                     STIM_ADDR = host
-                    print("***** STUMULATOR IP FOUND ******")
-                    print(f"****** {host} *****")
+                    #print("***** STUMULATOR IP FOUND ******")
+                    #print(f"****** {host} *****")
 
                     sensor_q.put(((host, port), {"stim_addr": host}))
                     continue
