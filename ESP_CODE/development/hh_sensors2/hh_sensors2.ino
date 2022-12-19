@@ -78,9 +78,9 @@ long lastActivePing = 0;
 const long ACTIVE_PING = 1000000;
 
 // Temperature update time
-const long TEMP_UPDATE = 5000000;
+const long TEMP_UPDATE = 10000000;
 // Temperature "on" time
-const long TEMP_ON = 2000000;
+const long TEMP_ON = 5000000;
 
 long lastTempTime = 0;
 long tempOffTime = 0;
@@ -178,25 +178,22 @@ void updateOutput() {
 
     if (temp > 0.2) {
       // make warm...
-//      Serial.println("warming up 1");
-
       digitalWrite(AIN2, LOW);
       digitalWrite(AIN1, HIGH);
 
     } else if (temp < -0.2) {
       // make cold...
-//      Serial.println("cooling down 1");
-
       digitalWrite(AIN1, LOW);
       digitalWrite(AIN2, HIGH);
 
     } else {
       // turn off...
-//      Serial.println("turning off 1");
-
       digitalWrite(AIN1, LOW);
       digitalWrite(AIN2, LOW);
     }
+    lastTempTime = micros();
+    tempOffTime = lastTempTime + TEMP_ON;
+    tempOn = true;
   }
 
   if (postObj.containsKey("temp2") && !ignoreTemp) {
@@ -205,31 +202,25 @@ void updateOutput() {
 
     if (temp > 0.2) {
       // make warm...
-//      Serial.println("warming up 2");
-
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, HIGH);
 
     } else if (temp < -0.2) {
       // make cold...
-//      Serial.println("cooling down 2");
-
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, HIGH);
 
     } else {
       // turn off...
-//      Serial.println("turning off 2");
-
       digitalWrite(BIN2, LOW);
       digitalWrite(BIN1, LOW);
     }
-  }
-
-  if (success) {
     lastTempTime = micros();
     tempOffTime = lastTempTime + TEMP_ON;
     tempOn = true;
+  }
+
+  if (success) {
     server.send(201);
   } else {
     server.send(400, F("text/html"), "neither temp1, temp2 or hightlight specified\n");
@@ -291,7 +282,6 @@ void updateScreen() {
   display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
 
   display.display(); 
- // delay(20);
 }
 
 void setup() {
@@ -393,14 +383,9 @@ void loop() {
   static long timer = 0;
   timer -= interval;
 
-  if(tempOn && (present > tempOffTime)){
+  if(present > tempOffTime{
     turnTempsOff();
   }
-
-//  if(present > lastActivePing + ACTIVE_PING){
-//    sendPing();
-//    lastActivePing = present;
-//  }
 
   if(present > lastDisplayTime + DISPLAY_REFRESH){
     updateScreen();
