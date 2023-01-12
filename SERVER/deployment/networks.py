@@ -1,7 +1,7 @@
 import sys
 import time
 from collections import deque
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -141,7 +141,7 @@ class Buffer:
         self.dead = np.zeros((max_size, 1), dtype=np.uint8)
         self.device = device
 
-    def add(self, state, action, reward, next_state, dead=False):
+    def add(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, dead: bool = False):
         self.state[self.ptr] = state
         self.action[self.ptr] = action
         self.reward[self.ptr] = reward
@@ -151,7 +151,7 @@ class Buffer:
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
 
-    def sample(self, batch_size):
+    def sample(self, batch_size: int) -> Tuple:
         ind = np.random.randint(0, self.size, size=batch_size)
 
         with torch.no_grad():
@@ -162,6 +162,27 @@ class Buffer:
                 torch.FloatTensor(self.next_state[ind]).to(self.device),
                 torch.FloatTensor(self.dead[ind]).to(self.device),
             )
+            
+    def to_dict(self) -> Dict[str, np.ndarray]:
+        return {
+            "state": self.state,
+            "action": self.action,
+            "reward": self.reward,
+            "next_state": self.next_state,
+            "dead": self.dead,
+            "size": self.size,
+            "max_size": self.max_size,
+        }
+        
+    def from_dict(self, data: Dict[str, np.ndarray]):
+        self.state = data["state"]
+        self.action = data["action"]
+        self.reward = data["reward"]
+        self.next_state = data["next_state"]
+        self.dead = data["dead"]
+        
+        self.size = data["size"]
+        self.max_size = data["max_size"]
 
 
 class SACModel:
