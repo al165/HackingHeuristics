@@ -65,7 +65,7 @@ OUTPUT_VECTOR = [
 ]
 
 OUTPUT_VECTOR_RANGES = {
-    "ampl": [3, 10],
+    "ampl": [3, 6],
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],
