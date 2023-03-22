@@ -25,10 +25,12 @@ class VAENetwork:
         self,
         model_params: Dict[str, float],
         saved_model: str = None,
+        live_train: bool = True,
     ):
 
         self.model_params = model_params
         self.model = LinearVAE(**model_params)
+        self.live_train = live_train
 
         self.training_data: List[torch.Tensor] = []
         self.batch = 0
@@ -45,7 +47,7 @@ class VAENetwork:
         self.batch += 1
         self.training_data.append(X.detach())
 
-        if self.batch >= 8:
+        if self.batch >= 8 and self.live_train:
             self.train()
 
         with torch.no_grad():
@@ -73,8 +75,10 @@ class VAENetwork:
 
         self.losses.append(np.mean(batch_losses))
 
-        print(" -- Training results:")
-        print(f" -- loss: {loss.item()}")
+        print('*' * 50)
+        print("* VAE Losses")
+        print(f"* {loss.item()}")
+        print('*' * 50)
 
         self.batch = 0
 
@@ -141,12 +145,20 @@ class Buffer:
         self.dead = np.zeros((max_size, 1), dtype=np.uint8)
         self.device = device
 
+        self.debug = "xxxxxxxx"
+        print("debug:", self.debug, id(self))
+
     def add(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, dead: bool = False):
         self.state[self.ptr] = state
-        self.action[self.ptr] = action
-        self.reward[self.ptr] = reward
-        self.next_state[self.ptr] = next_state
+        self.action[self.ptr] = np.copy(action)
+        self.reward[self.ptr] = np.copy(reward)
+        self.next_state[self.ptr] = np.copy(next_state)
         self.dead[self.ptr] = dead
+
+        self.debug = "hello"
+        
+        #print("state:", state, self.state[self.ptr])
+        print("debug:", self.debug, id(self))
 
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -164,12 +176,16 @@ class Buffer:
             )
             
     def to_dict(self) -> Dict[str, np.ndarray]:
+        print("Buffer.to_dict()")
+        #print(self.state[0])
+        print("debug", self.debug, id(self))
+
         return {
-            "state": self.state,
-            "action": self.action,
-            "reward": self.reward,
-            "next_state": self.next_state,
-            "dead": self.dead,
+            "state": np.copy(self.state),
+            "action": np.copy(self.action),
+            "reward": np.copy(self.reward),
+            "next_state": np.copy(self.next_state),
+            "dead": np.copy(self.dead),
             "size": self.size,
             "max_size": self.max_size,
         }
@@ -194,7 +210,6 @@ class SACModel:
         **kwargs,
     ):
 
-        print(kwargs)
         self.model = SAC_Agent(**kwargs, device=device)
         self.training_data = Buffer(
             kwargs.get("state_dim"), kwargs.get("action_dim"), device=device
@@ -226,6 +241,11 @@ class SACModel:
             self.losses["a_losses"].append(a_loss)
             self.losses["q_losses"].append(q_loss)
             self.n = 0
+
+            print('*' * 50)
+            print("* SAC Losses")
+            print(f"* {a_loss}    {q_loss}")
+            print('*' * 50)
 
     def get_action(
         self,

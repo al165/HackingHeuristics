@@ -10,8 +10,11 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
 
+from librosa import samples_to_time, frames_to_time, samples_to_frames
+
 from config import (
     DATA_KEYS,
+    DATA_UNITS,
     DATA_NAME_MAP,
     FEATURE_VECTOR_MAP,
     OUTPUT_VECTOR,
@@ -28,6 +31,17 @@ matplotlib.rcParams["text.color"] = "#AAA"
 
 CMAP = matplotlib.cm.get_cmap("rainbow")
 
+SR = 512
+FRAME_LENGTH = 512
+HOP_LENGTH = 128
+FR = samples_to_frames(SR, hop_length=HOP_LENGTH)
+
+INPUT_MAX = 4096
+
+BUFFERSIZE = 1024
+MAX_PLOT_SAMPLES = 4000
+MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
+
 
 AX_LIMS = {
     "EEG": (-1.1, 1.1),
@@ -36,6 +50,10 @@ AX_LIMS = {
     "heart": (-1.1, 1.1),
 }
 
+t_sr = samples_to_time(np.arange(-MAX_PLOT_SAMPLES, 0), sr=SR)
+t_f = frames_to_time(np.arange(-MAX_PLOT_FRAMES, 0), sr=SR, hop_length=HOP_LENGTH)
+
+print(f't_f {len(t_f)}, t_sr {len(t_sr)}')
 
 def external_plotter(plot_q, host: str = "127.0.0.1", port: int = 3334):
     from pythonosc import udp_client
@@ -222,7 +240,19 @@ class FullPlotter:
             },
         }
 
-        self.lines = self.plot_data.copy()
+        self.lines = {
+            "sensors": dict(),
+            "map": dict(),
+            "feature_vectors": dict(),
+            "output_vectors": dict(),
+            "embedder_losses": [],
+            "translator_losses": {
+                "a_losses": [],
+                "q_losses": [],
+            },
+        }
+
+        #self.lines = self.plot_data.copy()
 
         em_l = Line2D([], [], color="white")
         self.lines["embedder_losses"] = em_l
@@ -262,24 +292,40 @@ class FullPlotter:
               - <host> = list
           - 'output_vectors'
               - <host> = list
-          - 'training_losses'
-              - 'embedding' = list
-              - 'intrepretter' = list
-              - 'translator'
-                - 'a_loss' = list
-                - 'q_loss' = list
+          - 'embedding' = list
+          - 'intrepretter' = list
+          - 'translator'
+            - 'a_loss' = list
+            - 'q_loss' = list
         """
 
         all_lines: List[Line2D] = []
         updated = False
 
-        while True:
-            try:
-                plot_data = self.plot_q.get(block=False)
-                self.plot_data.update(plot_data)
-                updated = True
-            except Empty:
-                break
+        try:
+            plot_data = self.plot_q.get(block=False)
+            #print(plot_data["agents"])
+            #print(plot_data["center"])
+            #self.plot_data.update(plot_data)
+
+            for host, agent in plot_data["agents"].items():
+                #print(agent)
+                self.plot_data["sensors"][host] = agent.sensor_data
+                self.plot_data["map"][host] = agent.map
+                self.plot_data["output_vectors"][host] = agent.output_vectors 
+                self.plot_data["feature_vectors"][host] = agent.feature_vectors
+                #self.plot_data["training_losses"]
+
+            if "embedding_losses" in plot_data:
+                self.plot_data["embedder_losses"] = plot_data["embedding_losses"]
+
+            if "translator_losses" in plot_data:
+                self.plot_data["translator_losses"] = plot_data["translator_losses"]
+                print(plot_data["translator_losses"])
+
+            updated = True
+        except Empty:
+            pass
 
         if not updated:
             return all_lines
@@ -291,11 +337,16 @@ class FullPlotter:
 
             name = DATA_NAME_MAP[dk]
             for host in self.plot_data["sensors"].keys():
-                buffers = self.plot_data["sensors"][host][name]
+                y = self.plot_data["sensors"][host][name]
+                if len(y) == 0:
+                    continue
 
                 t = t_f
                 if DATA_UNITS[dk] == "samples":
                     t = t_sr
+
+                buffers = np.zeros(len(t))
+                buffers[-len(y):] = y
 
                 if host not in self.colors:
                     c = CMAP(len(self.colors) / 8)
@@ -305,16 +356,20 @@ class FullPlotter:
                     self.lines["sensors"][host] = dict()
 
                 if name not in self.lines["sensors"][host]:
+                    print("adding new sensors line for", host, name)
+                    print(t.shape, buffers.shape)
                     line = Line2D(
-                        t,
+                        np.arange(len(buffers)),
                         buffers,
                         linewidth=1,
                         alpha=0.5,
                         color=self.colors[host],
                     )
                     self.lines["sensors"][host][name] = line
+                    print(line)
                     ax.add_line(line)
                 else:
+                    #print(self.lines["sensors"][host])
                     self.lines["sensors"][host][name].set_data(t, buffers)
 
                 all_lines.append(self.lines["sensors"][host][name])

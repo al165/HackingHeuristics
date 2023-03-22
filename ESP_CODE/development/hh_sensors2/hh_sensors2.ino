@@ -49,7 +49,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 WiFiManager wm;
 // IP Address of computer running HH_server.py:
-IPAddress host(192, 168, 2, 8);
+IPAddress host(192, 168, 2, 80);
 const unsigned int PORT = 8080;
 const unsigned int PORT_RANGE = 10;
 unsigned int currentPort = PORT;
@@ -298,6 +298,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
+  WiFi.mode(WIFI_STA);
+
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
     for(;;);
@@ -363,6 +365,7 @@ void loop() {
     int len = UDP.read(packet, 255);
     host = UDP.remoteIP();
     currentPort = UDP.remotePort();
+    Serial.println(host);
   }
 
   // check connection:

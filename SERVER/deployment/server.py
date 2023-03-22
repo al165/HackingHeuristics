@@ -56,12 +56,8 @@ parser.add_argument(
     help="load latest model. Default False.",
 )
 
-args = parser.parse_args()
-
 HOST = "0.0.0.0"
 PORT = 8080
-if args.port:
-    PORT = args.port
 
 SR = 512
 FRAME_LENGTH = 512
@@ -76,8 +72,6 @@ MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
 
 UPDATE_TIME = 4
 
-t_sr = samples_to_time(np.arange(-MAX_PLOT_SAMPLES, 0), sr=SR)
-t_f = frames_to_time(np.arange(-MAX_PLOT_FRAMES, 0), sr=SR, hop_length=HOP_LENGTH)
 
 processors = {
     "EEG": dp.ProcessorList(
@@ -195,6 +189,7 @@ class Translator(multiprocessing.Process):
 
         self.embedderNetwork = VAENetwork(embedder_params)
         self.translator = SACModel(**translator_params)
+        print("server: debug", self.translator.training_data.debug, id(self.translator.training_data.debug))
 
         self.targets = deque(maxlen=8)
 
@@ -211,7 +206,7 @@ class Translator(multiprocessing.Process):
             self.loadLatest()
 
         print("Translator init done")
-        self.save()
+        #self.save()
 
     def getActiveAgents(self) -> Dict[str, Agent]:
         active = dict(
@@ -374,10 +369,12 @@ class Translator(multiprocessing.Process):
 
         self.last_feature_time = now
 
+        print("getFeatures")
         target = self.getCenter()
 
         for host, agent in self.getActiveAgents().items():
             features = dict()
+            print(host)
             try:
                 for name in DATA_NAME_MAP.values():
                     buffer = agent.sensor_data[name]
@@ -409,7 +406,10 @@ class Translator(multiprocessing.Process):
                 reward = -np.linalg.norm(z - target)
                 agent.highlight = bool(reward > -0.2)
 
+                #print(f"Add training data, on thread {threading.get_ident()}")
                 self.translator.add(prev_state, action, reward, curr_state, False)
+                # print(self.translator.training_data.state[0], id(self.translator))
+                # print("server: debug", self.translator.training_data.debug, id(self.translator.training_data))
                 deterministic = True
 
             a = self.translator.get_action(curr_state, deterministic)
@@ -427,7 +427,12 @@ class Translator(multiprocessing.Process):
 
     def updatePlotQueue(self):
         if self.updated:
-            self.plot_q.put({"agents": self.agents, "center": self.targets[-1]})
+            self.plot_q.put({
+                "agents": self.agents, 
+                "center": self.targets[-1],
+                "embedding_losses": self.embedderNetwork.losses,
+                "translator_losses": self.translator.losses,
+            })
             self.updated = False
 
     def run(self):
@@ -437,25 +442,26 @@ class Translator(multiprocessing.Process):
                 self.collect()
                 self.getFeatures()
                 self.updatePlotQueue()
-                hour = datetime.hour
-                if time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL and hour > 10 and hour < 20:
+                hour = datetime.now().hour
+                if (time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL) and hour > 10 and hour < 20:
+                    print("checkpointing")
                     self.save()
                 sleep(0.2)
-                #print(self.stim_addr)
             except KeyboardInterrupt:
+                self.save()
                 self.running.clear()
 
     def join(self, timeout=1):
         print("Translator join()")
-        self.save()
         self.running.clear()
         super(Translator, self).join(timeout)
 
     def save(self):
-        print("saving checkpoints")
+        print(f"saving checkpoints... on thread {threading.get_ident()}")
+        training_data = self.translator.training_data.to_dict()
+
         SAC_state_dicts = self.translator.save()
         embedder_state_dict = self.embedderNetwork.model.state_dict()
-        training_data = self.translator.training_data.to_dict()
 
         data = {
             "sac": SAC_state_dicts,
@@ -467,8 +473,10 @@ class Translator(multiprocessing.Process):
         torch.save(data, os.path.join(CHECKPOINT_PATH, fn))
 
         self.last_checkpoint_time = time()
+        print(f"done (saved to {os.path.join(CHECKPOINT_PATH, fn)})\n")
 
     def load(self, path: str):
+        print("load()")
         try:
             data = torch.load(path)
         except FileNotFoundError:
@@ -507,17 +515,17 @@ def post_request(url, headers, data, timeout=1.0):
 
 
 def plot(plot_q: multiprocessing.Queue):
-    # pltr = MinPlotter(plot_q)
+    pltr = FullPlotter(plot_q)
 
     try:
-        # ani = animation.FuncAnimation(
-        #     pltr.fig,
-        #     pltr.animate,
-        #     interval=250,
-        #     blit=True,
-        # )
-        # plt.tight_layout()
-        # plt.show()
+        ani = animation.FuncAnimation(
+            pltr.fig,
+            pltr.animate,
+            interval=250,
+            blit=True,
+        )
+        plt.tight_layout()
+        plt.show()
 
         # t = threading.Thread(
         #    target=external_plotter,
@@ -525,7 +533,7 @@ def plot(plot_q: multiprocessing.Queue):
         # )
         # t.start()
 
-        external_plotter(plot_q)
+        #external_plotter(plot_q)
 
     except KeyboardInterrupt:
         # ani.pause()
@@ -583,7 +591,7 @@ def processBuffer(data):
         return values
     except Exception as e:
         print(e)
-        print(data)
+        #print(data)
         return {"data0": [], "data1": [], "data2": [], "data3": [], "active": False}
 
 
@@ -663,10 +671,10 @@ def lighthouse(sensor_q):
 
                 print(f"MAC Address found: {mac} from '{host}'")
 
-                ##if mac not in i2c_ADDRESSES:
-                ##    print(" === Unassigned device (not found in i2c_ADDRESSES)")
+#                 if mac not in i2c_ADDRESSES:
+#                     print(" === Unassigned device (not found in i2c_ADDRESSES)")
 
-                ##mac_adderesses[host] = mac
+#                 mac_adderesses[host] = mac
                 s.sendto(b"lighthouse", (host, port))
 
         except KeyboardInterrupt:
@@ -674,7 +682,11 @@ def lighthouse(sensor_q):
             return
 
 
-def main():
+def main():    
+    args = parser.parse_args()
+    if args.port:
+        PORT = args.port
+    
     # raw sensor data is collected by 'handle_client' threads and sent
     # to the Translator over 'sensor_q'
     sensor_q = multiprocessing.Queue()

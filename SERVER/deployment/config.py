@@ -14,7 +14,7 @@ i2c_ADDRESSES = {
     "94:E6:86:05:13:4C": (0x1A, 1, 6),  # ESP 6
     #"24:D7:EB:14:F1:08": (0x1A, 1, 6),  # ESP 6
     "94:E6:86:03:A3:C4": (0x1C, 2, 7),  # ESP 7
-    "3C:61:05:D1:87:EF": (0x1A, 1, 0),  # DEBUG ESP 0
+    "C4:4F:33:65:DA:79": (0x1A, 1, 0),  # DEBUG ESP 0
     "E8:DB:84:C5:C2:B5": (0x1A, 2, 1),  # DEBUG ESP 1
 }
 
@@ -23,6 +23,7 @@ i2c_ADDRESSES = {
 CHECKPOINT_PATH = "../checkpoints"
 
 # Save checkpoint every 4 hours:
+#CHECKPOINT_INTERVAL = 4
 CHECKPOINT_INTERVAL = 60 * 60 * 4
 
 # Data information
