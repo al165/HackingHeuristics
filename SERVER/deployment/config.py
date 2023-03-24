@@ -19,6 +19,12 @@ i2c_ADDRESSES = {
 }
 
 
+# Save directory to store data traces
+TRACE_DIR = "../sessions"
+
+# data to store in trace
+#TRACE_FIELDS = ["time", "EEG:mean"]
+
 # Save directory for model weights and training data
 CHECKPOINT_PATH = "../checkpoints"
 

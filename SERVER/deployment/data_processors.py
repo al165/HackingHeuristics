@@ -44,7 +44,8 @@ class NormaliseProcessor(Processor):
             else:
                 self._buffer = np.copy(y)[-self.max_hist :]
 
-            self.mean = self._buffer.mean()
+            if len(self._buffer) > 0:
+                self.mean = self._buffer.mean()
 
         norm = y - self.mean
         norm /= float(self.inrange[1] - self.inrange[0])
@@ -200,9 +201,15 @@ class FeatureExtractor:
 
 class MeanFeature(FeatureExtractor):
     def __call__(self, buffer: np.ndarray) -> Dict[str, float]:
-        result = {
-            "mean": np.mean(buffer[-self.period :]),
-        }
+        if len(buffer) > 1:
+            result = {
+                "mean": np.mean(buffer[-self.period :]),
+            }
+        else:
+            result = {
+                "mean": 0.0
+            }
+
         return result
 
 
@@ -259,6 +266,15 @@ class PeakActivityFeature(FeatureExtractor):
 
     def __call__(self, buffer: np.ndarray) -> Dict[str, float]:
         data = buffer[-self.period :]
+        if len(data) == 0:
+            result = {
+                "p_rate": 0,
+                "n_rate": 0,
+                "all_rate": 0,
+            }
+
+            return result
+            
         avg = data.mean()
         pos = np.where(data - avg > self.sensitivity)[0]
         neg = np.where(data - avg < -self.sensitivity)[0]

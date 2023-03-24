@@ -1,6 +1,7 @@
 #!/bin/python
 
 import os
+import csv
 import json
 import socket
 import argparse
@@ -36,6 +37,7 @@ from plotters import FullPlotter, MinPlotter, external_plotter
 from config import (
     i2c_ADDRESSES,
     STIM_ADDR,
+    TRACE_DIR,
     CHECKPOINT_INTERVAL,
     CHECKPOINT_PATH,
     DATA_KEYS,
@@ -54,6 +56,14 @@ parser.add_argument(
     default=False,
     required=False,
     help="load latest model. Default False.",
+)
+parser.add_argument(
+    "-t", 
+    "--trace", 
+    default=False, 
+    required=False, 
+    action="store_true", 
+    help="save .csv files tracing agent's state"
 )
 
 HOST = "0.0.0.0"
@@ -175,6 +185,7 @@ class Translator(multiprocessing.Process):
         decision_params: Dict,
         translator_params: Dict,
         load_latest: bool = False,
+        save_trace: bool = False,
     ):
 
         super(Translator, self).__init__()
@@ -187,9 +198,11 @@ class Translator(multiprocessing.Process):
         self.last_checkpoint_time = 0
         self.last_checkpoint_time = time()
 
+        self.save_trace = save_trace
+
         self.embedderNetwork = VAENetwork(embedder_params)
         self.translator = SACModel(**translator_params)
-        print("server: debug", self.translator.training_data.debug, id(self.translator.training_data.debug))
+        #print("server: debug", self.translator.training_data.debug, id(self.translator.training_data.debug))
 
         self.targets = deque(maxlen=8)
 
@@ -204,6 +217,14 @@ class Translator(multiprocessing.Process):
 
         if load_latest:
             self.loadLatest()
+
+        self.session_name = datetime.now().strftime("Session_%Y%m%d_%H%M%S")
+
+        if self.save_trace:
+            os.mkdir(os.path.join(TRACE_DIR, self.session_name))
+
+        self.fieldnames = ["time"] + FEATURE_VECTOR_MAP + OUTPUT_VECTOR + ["map_x", "map_y", "active", "highlight"]
+        #self.trace_writer = csv.DictWriter()
 
         print("Translator init done")
         #self.save()
@@ -270,10 +291,6 @@ class Translator(multiprocessing.Process):
 
         for i, name in enumerate(OUTPUT_VECTOR):
             if name in ("temp1", "temp2", "highlight"):
-                # temporary disable temp controls
-                if name in ("temp1", "temp2"):
-                    #continue
-                    val = 0.0
                 update_data[name.lower()] = val
             else:
                 val = np.clip(y[i], -1, 1)
@@ -281,10 +298,6 @@ class Translator(multiprocessing.Process):
                 out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
                 data[name.lower()] = out
         
-        #print(data)
-        #print(host_url)
-        #print(update_data)
-
         t1 = threading.Thread(
             target=post_request,
             args=(url, headers, data, 0.5),
@@ -322,6 +335,11 @@ class Translator(multiprocessing.Process):
         self.agents[host] = agent
         self.updated = True
         print(f"** new agent added (ESP {id}) **")
+
+        if self.save_trace:
+            with open(os.path.join(TRACE_DIR, self.session_name, f'ESP{agent.id}.csv'), "w") as f:
+                writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
+                writer.writeheader()
 
     def collect(self):
         while True:
@@ -406,10 +424,7 @@ class Translator(multiprocessing.Process):
                 reward = -np.linalg.norm(z - target)
                 agent.highlight = bool(reward > -0.2)
 
-                #print(f"Add training data, on thread {threading.get_ident()}")
                 self.translator.add(prev_state, action, reward, curr_state, False)
-                # print(self.translator.training_data.state[0], id(self.translator))
-                # print("server: debug", self.translator.training_data.debug, id(self.translator.training_data))
                 deterministic = True
 
             a = self.translator.get_action(curr_state, deterministic)
@@ -421,9 +436,22 @@ class Translator(multiprocessing.Process):
             self.agents[host] = agent
             self.postOutput(host, a)
 
-        self.targets.append(target)
+            if self.save_trace:
+                with open(os.path.join(TRACE_DIR, self.session_name, f'ESP{agent.id}.csv'), "a") as f:
+                    writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
 
-        #print("-----------")
+                    line = dict(features)
+                    line["time"] = int(time())
+                    line["active"] = agent.active
+                    line["highlight"] = agent.highlight
+                    for i, name in enumerate(OUTPUT_VECTOR):
+                        line[name] = a[i]
+                    line["map_x"] = z[0]
+                    line["map_y"] = z[1]
+
+                    writer.writerow(line)
+
+        self.targets.append(target)
 
     def updatePlotQueue(self):
         if self.updated:
@@ -567,7 +595,7 @@ def handle_client(sensor_q, conn, addr):
                         if name not in processors:
                             continue
 
-                        if name == "GSR":
+                        if name == "GSR" and len(values["data3"]) > 0:
                             active = bool(np.mean(values["data3"]) > 10)
                             values["active"] = active
 
@@ -702,6 +730,7 @@ def main():
         decision_params,
         translator_params,
         load_latest=args.load,
+        save_trace=args.trace,
     )
     translator.start()
 

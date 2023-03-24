@@ -145,21 +145,13 @@ class Buffer:
         self.dead = np.zeros((max_size, 1), dtype=np.uint8)
         self.device = device
 
-        self.debug = "xxxxxxxx"
-        print("debug:", self.debug, id(self))
-
     def add(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, dead: bool = False):
         self.state[self.ptr] = state
         self.action[self.ptr] = np.copy(action)
         self.reward[self.ptr] = np.copy(reward)
         self.next_state[self.ptr] = np.copy(next_state)
         self.dead[self.ptr] = dead
-
-        self.debug = "hello"
-        
-        #print("state:", state, self.state[self.ptr])
-        print("debug:", self.debug, id(self))
-
+       
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
 
@@ -177,8 +169,6 @@ class Buffer:
             
     def to_dict(self) -> Dict[str, np.ndarray]:
         print("Buffer.to_dict()")
-        #print(self.state[0])
-        print("debug", self.debug, id(self))
 
         return {
             "state": np.copy(self.state),

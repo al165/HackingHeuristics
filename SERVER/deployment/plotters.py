@@ -141,8 +141,6 @@ class MinPlotter:
             xs = m[:, 0]
             ys = m[:, 1]
 
-            print(xs, ys)
-
             if id not in self.lines["map"]:
                 line = Line2D(xs, ys, color=self.colors[id])
                 self.lines["map"][id] = line
@@ -304,12 +302,8 @@ class FullPlotter:
 
         try:
             plot_data = self.plot_q.get(block=False)
-            #print(plot_data["agents"])
-            #print(plot_data["center"])
-            #self.plot_data.update(plot_data)
 
             for host, agent in plot_data["agents"].items():
-                #print(agent)
                 self.plot_data["sensors"][host] = agent.sensor_data
                 self.plot_data["map"][host] = agent.map
                 self.plot_data["output_vectors"][host] = agent.output_vectors 
@@ -321,7 +315,6 @@ class FullPlotter:
 
             if "translator_losses" in plot_data:
                 self.plot_data["translator_losses"] = plot_data["translator_losses"]
-                print(plot_data["translator_losses"])
 
             updated = True
         except Empty:
@@ -356,8 +349,6 @@ class FullPlotter:
                     self.lines["sensors"][host] = dict()
 
                 if name not in self.lines["sensors"][host]:
-                    print("adding new sensors line for", host, name)
-                    print(t.shape, buffers.shape)
                     line = Line2D(
                         np.arange(len(buffers)),
                         buffers,
@@ -366,10 +357,8 @@ class FullPlotter:
                         color=self.colors[host],
                     )
                     self.lines["sensors"][host][name] = line
-                    print(line)
                     ax.add_line(line)
                 else:
-                    #print(self.lines["sensors"][host])
                     self.lines["sensors"][host][name].set_data(t, buffers)
 
                 all_lines.append(self.lines["sensors"][host][name])
