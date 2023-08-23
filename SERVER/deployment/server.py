@@ -543,17 +543,17 @@ def post_request(url, headers, data, timeout=1.0):
 
 
 def plot(plot_q: multiprocessing.Queue):
-    pltr = FullPlotter(plot_q)
+    #pltr = FullPlotter(plot_q)
 
     try:
-        ani = animation.FuncAnimation(
-            pltr.fig,
-            pltr.animate,
-            interval=250,
-            blit=True,
-        )
-        plt.tight_layout()
-        plt.show()
+        # ani = animation.FuncAnimation(
+        #     pltr.fig,
+        #     pltr.animate,
+        #     interval=250,
+        #     blit=True,
+        # )
+        # plt.tight_layout()
+        # plt.show()
 
         # t = threading.Thread(
         #    target=external_plotter,
@@ -561,7 +561,7 @@ def plot(plot_q: multiprocessing.Queue):
         # )
         # t.start()
 
-        #external_plotter(plot_q)
+        external_plotter(plot_q)
 
     except KeyboardInterrupt:
         # ani.pause()
