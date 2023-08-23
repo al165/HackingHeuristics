@@ -1,0 +1,53 @@
+*Pick And Place List
+*Company=
+*Author=
+*eMail=
+*
+*Project=RoundPCB controller v2
+*Date=12:41:54
+*CreatedBy=Fritzing 0.9.10b.2022-07-01.CD-2134-0-40d23c29
+*
+*
+*Coordinates in mm, always center of component
+*Origin 0/0=Lower left corner of PCB
+*Rotation in degree (0-360, math. pos.)
+*
+*No;Value;Package;X;Y;Rotation;Side;Name
+1;;;41.4113;-76.8498;0;Bottom;TXT1
+2;;THT;44.0972;-90.908;-90;Bottom;-   5V    +
+3;;;69.8498;-59.92;0;Bottom;Hole11
+4;;;41.0369;-83.8198;0;Bottom;TXT1
+5;;THT;82.5497;-40.87;0;Bottom;PELTIER 
+6;2.2;1206 [SMD];27.6596;-54.8401;0;Bottom;2K
+7;10k;1206 [SMD];37.8196;-16.7401;3.18056e-15;Bottom;10K
+8;2.2;1206 [SMD];27.6596;-44.6801;0;Bottom;2K
+9;;THT;16.5097;-59.92;0;Bottom;ECG(39)
+10;;;57.1497;-6.58005;0;Bottom;Hole9
+11;;THT;62.2297;-40.87;0;Bottom;H-BRIDGE
+12;2.2;1206 [SMD];27.6596;-33.5041;0;Bottom;2K
+13;;;13.9697;-75.16;0;Bottom;Hole19
+14;;;52.0697;-90.4;0;Bottom;Hole5
+15;;;6.34971;-34.5201;0;Bottom;Hole15
+16;;THT;46.0728;-13.6922;-90;Bottom;GSR
+17;1k;1206 [SMD];27.6596;-30.4561;0;Bottom;1K
+18;;;69.8498;-54.84;0;Bottom;Hole12
+19;;;45.5687;-29.8891;-90;Bottom;U1
+20;;;44.2945;-71.4241;180;Bottom;OLED1
+21;;THT;24.1297;-34.52;0;Bottom;EEG(32)
+22;;;6.34971;-59.9201;0;Bottom;Hole13
+23;;;36.8297;-90.4;0;Bottom;Hole6
+24;1k;1206 [SMD];27.6596;-42.1401;0;Bottom;1K
+25;;;77.4698;-44.68;0;Bottom;Hole17
+26;;THT;77.9777;-58.2971;0;Bottom;J1
+27;;switch-spdt_lock.007s;68.6756;-77.8904;-30.1724;Bottom;ON --- OFF
+28;;;77.4698;-37.06;0;Bottom;Hole16
+29;;;69.8497;-14.2;0;Bottom;Hole18
+30;;THT;72.3897;-57.6151;0;Bottom;ELECTRODE
+31;;;41.4158;-80.0536;0;Bottom;TXT1
+32;;THT;21.5897;-44.68;0;Bottom;EOG(34)
+33;1k;1206 [SMD];27.6596;-52.3001;0;Bottom;1K
+34;;THT;43.5328;-69.572;-90;Bottom;+   5V    -
+35;;;3.80971;-44.6801;0;Bottom;Hole14
+36;;;77.4697;-70.08;0;Bottom;Hole20
+37;;THT;21.0786;-71.4574;23.7278;Bottom;IND 
+38;;;16.5097;-14.2;0;Bottom;Hole21
