@@ -1,6 +1,12 @@
 .ipynb_checkpoints
 *.pth
 *.log
+*.zip
+*.tar.gz
+*.csv
+*.json
+
+SERVER/sessions/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

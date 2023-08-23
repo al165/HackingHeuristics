@@ -11,18 +11,26 @@ i2c_ADDRESSES = {
     "40:22:D8:7A:27:D8": (0x1C, 1, 3),  # ESP 3
     "C0:49:EF:E4:60:BC": (0x1D, 1, 4),  # ESP 4
     "EC:62:60:9D:2A:B0": (0x1A, 2, 5),  # ESP 5
-    "24:D7:EB:14:F1:08": (0x1A, 1, 6),  # ESP 6
+    "94:E6:86:05:13:4C": (0x1A, 1, 6),  # ESP 6
+    #"24:D7:EB:14:F1:08": (0x1A, 1, 6),  # ESP 6
     "94:E6:86:03:A3:C4": (0x1C, 2, 7),  # ESP 7
-    "3C:61:05:D1:87:EF": (0x1A, 1, 0),  # DEBUG ESP 0
+    "C4:4F:33:65:DA:79": (0x1A, 1, 0),  # DEBUG ESP 0
     "E8:DB:84:C5:C2:B5": (0x1A, 2, 1),  # DEBUG ESP 1
 }
 
 
+# Save directory to store data traces
+TRACE_DIR = "../sessions"
+
+# data to store in trace
+#TRACE_FIELDS = ["time", "EEG:mean"]
+
 # Save directory for model weights and training data
 CHECKPOINT_PATH = "../checkpoints"
 
-# Save checkpoint every hour:
-CHECKPOINT_INTERVAL = 60 * 60 * 1
+# Save checkpoint every 4 hours:
+#CHECKPOINT_INTERVAL = 4
+CHECKPOINT_INTERVAL = 60 * 60 * 4
 
 # Data information
 DATA_KEYS = ["data0", "data1", "data2", "data3"]
@@ -64,7 +72,7 @@ OUTPUT_VECTOR = [
 ]
 
 OUTPUT_VECTOR_RANGES = {
-    "ampl": [3, 14],
+    "ampl": [3, 6],
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],

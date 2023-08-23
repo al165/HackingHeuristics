@@ -1,6 +1,7 @@
 #!/bin/python
 
 import os
+import csv
 import json
 import socket
 import argparse
@@ -36,6 +37,7 @@ from plotters import FullPlotter, MinPlotter, external_plotter
 from config import (
     i2c_ADDRESSES,
     STIM_ADDR,
+    TRACE_DIR,
     CHECKPOINT_INTERVAL,
     CHECKPOINT_PATH,
     DATA_KEYS,
@@ -55,13 +57,17 @@ parser.add_argument(
     required=False,
     help="load latest model. Default False.",
 )
-
-args = parser.parse_args()
+parser.add_argument(
+    "-t", 
+    "--trace", 
+    default=False, 
+    required=False, 
+    action="store_true", 
+    help="save .csv files tracing agent's state"
+)
 
 HOST = "0.0.0.0"
 PORT = 8080
-if args.port:
-    PORT = args.port
 
 SR = 512
 FRAME_LENGTH = 512
@@ -76,8 +82,6 @@ MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
 
 UPDATE_TIME = 4
 
-t_sr = samples_to_time(np.arange(-MAX_PLOT_SAMPLES, 0), sr=SR)
-t_f = frames_to_time(np.arange(-MAX_PLOT_FRAMES, 0), sr=SR, hop_length=HOP_LENGTH)
 
 processors = {
     "EEG": dp.ProcessorList(
@@ -181,6 +185,7 @@ class Translator(multiprocessing.Process):
         decision_params: Dict,
         translator_params: Dict,
         load_latest: bool = False,
+        save_trace: bool = False,
     ):
 
         super(Translator, self).__init__()
@@ -190,10 +195,14 @@ class Translator(multiprocessing.Process):
         self.last_feature_time = 0
         self.last_output_time = dict()
 
+        self.last_checkpoint_time = 0
         self.last_checkpoint_time = time()
+
+        self.save_trace = save_trace
 
         self.embedderNetwork = VAENetwork(embedder_params)
         self.translator = SACModel(**translator_params)
+        #print("server: debug", self.translator.training_data.debug, id(self.translator.training_data.debug))
 
         self.targets = deque(maxlen=8)
 
@@ -203,11 +212,22 @@ class Translator(multiprocessing.Process):
         self.updated = False
 
         self.stim_addr = STIM_ADDR
+        
+        self.connections = dict()  # save IP addresses for debugging
 
         if load_latest:
             self.loadLatest()
 
+        self.session_name = datetime.now().strftime("Session_%Y%m%d_%H%M%S")
+
+        if self.save_trace:
+            os.mkdir(os.path.join(TRACE_DIR, self.session_name))
+
+        self.fieldnames = ["time"] + FEATURE_VECTOR_MAP + OUTPUT_VECTOR + ["map_x", "map_y", "active", "highlight"]
+        #self.trace_writer = csv.DictWriter()
+
         print("Translator init done")
+        #self.save()
 
     def getActiveAgents(self) -> Dict[str, Agent]:
         active = dict(
@@ -278,10 +298,6 @@ class Translator(multiprocessing.Process):
                 out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
                 data[name.lower()] = out
         
-        print(data)
-        print(host_url)
-        print(update_data)
-
         t1 = threading.Thread(
             target=post_request,
             args=(url, headers, data, 0.5),
@@ -311,10 +327,19 @@ class Translator(multiprocessing.Process):
             stim_addr=stim_addr,
             stim_chan=stim_chan,
         )
+        
+        self.connections[id] = (mac, host, port)
+        with open("./connections.json", "w") as f:
+            json.dump(self.connections, f, sort_keys=True, indent=4)
 
         self.agents[host] = agent
         self.updated = True
         print(f"** new agent added (ESP {id}) **")
+
+        if self.save_trace:
+            with open(os.path.join(TRACE_DIR, self.session_name, f'ESP{agent.id}.csv'), "w") as f:
+                writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
+                writer.writeheader()
 
     def collect(self):
         while True:
@@ -362,10 +387,12 @@ class Translator(multiprocessing.Process):
 
         self.last_feature_time = now
 
+        print("getFeatures")
         target = self.getCenter()
 
         for host, agent in self.getActiveAgents().items():
             features = dict()
+            print(host)
             try:
                 for name in DATA_NAME_MAP.values():
                     buffer = agent.sensor_data[name]
@@ -409,13 +436,31 @@ class Translator(multiprocessing.Process):
             self.agents[host] = agent
             self.postOutput(host, a)
 
-        self.targets.append(target)
+            if self.save_trace:
+                with open(os.path.join(TRACE_DIR, self.session_name, f'ESP{agent.id}.csv'), "a") as f:
+                    writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
 
-        #print("-----------")
+                    line = dict(features)
+                    line["time"] = int(time())
+                    line["active"] = agent.active
+                    line["highlight"] = agent.highlight
+                    for i, name in enumerate(OUTPUT_VECTOR):
+                        line[name] = a[i]
+                    line["map_x"] = z[0]
+                    line["map_y"] = z[1]
+
+                    writer.writerow(line)
+
+        self.targets.append(target)
 
     def updatePlotQueue(self):
         if self.updated:
-            self.plot_q.put({"agents": self.agents, "center": self.targets[-1]})
+            self.plot_q.put({
+                "agents": self.agents, 
+                "center": self.targets[-1],
+                "embedding_losses": self.embedderNetwork.losses,
+                "translator_losses": self.translator.losses,
+            })
             self.updated = False
 
     def run(self):
@@ -425,35 +470,41 @@ class Translator(multiprocessing.Process):
                 self.collect()
                 self.getFeatures()
                 self.updatePlotQueue()
-                if time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL:
+                hour = datetime.now().hour
+                if (time() >= self.last_checkpoint_time + CHECKPOINT_INTERVAL) and hour > 10 and hour < 20:
+                    print("checkpointing")
                     self.save()
                 sleep(0.2)
-                #print(self.stim_addr)
             except KeyboardInterrupt:
+                self.save()
                 self.running.clear()
 
     def join(self, timeout=1):
         print("Translator join()")
-        self.save()
         self.running.clear()
         super(Translator, self).join(timeout)
 
     def save(self):
-        print("saving checkpoints")
+        print(f"saving checkpoints... on thread {threading.get_ident()}")
+        training_data = self.translator.training_data.to_dict()
+
         SAC_state_dicts = self.translator.save()
         embedder_state_dict = self.embedderNetwork.model.state_dict()
 
         data = {
             "sac": SAC_state_dicts,
             "embedder": embedder_state_dict,
+            "buffer": training_data,
         }
 
         fn = datetime.now().strftime("%Y%m%d_%H%M%S.pth")
         torch.save(data, os.path.join(CHECKPOINT_PATH, fn))
 
         self.last_checkpoint_time = time()
+        print(f"done (saved to {os.path.join(CHECKPOINT_PATH, fn)})\n")
 
     def load(self, path: str):
+        print("load()")
         try:
             data = torch.load(path)
         except FileNotFoundError:
@@ -462,6 +513,9 @@ class Translator(multiprocessing.Process):
 
         self.translator.load(data["sac"])
         self.embedderNetwork.model.load_state_dict(data["embedder"])
+        if "buffer" in data:
+            print("loading training data")
+            self.translator.training_data.from_dict(data["buffer"])
 
     def loadLatest(self):
         files = list(sorted(os.listdir(CHECKPOINT_PATH)))
@@ -489,17 +543,17 @@ def post_request(url, headers, data, timeout=1.0):
 
 
 def plot(plot_q: multiprocessing.Queue):
-    # pltr = MinPlotter(plot_q)
+    pltr = FullPlotter(plot_q)
 
     try:
-        # ani = animation.FuncAnimation(
-        #     pltr.fig,
-        #     pltr.animate,
-        #     interval=250,
-        #     blit=True,
-        # )
-        # plt.tight_layout()
-        # plt.show()
+        ani = animation.FuncAnimation(
+            pltr.fig,
+            pltr.animate,
+            interval=250,
+            blit=True,
+        )
+        plt.tight_layout()
+        plt.show()
 
         # t = threading.Thread(
         #    target=external_plotter,
@@ -507,7 +561,7 @@ def plot(plot_q: multiprocessing.Queue):
         # )
         # t.start()
 
-        external_plotter(plot_q)
+        #external_plotter(plot_q)
 
     except KeyboardInterrupt:
         # ani.pause()
@@ -541,7 +595,7 @@ def handle_client(sensor_q, conn, addr):
                         if name not in processors:
                             continue
 
-                        if name == "GSR":
+                        if name == "GSR" and len(values["data3"]) > 0:
                             active = bool(np.mean(values["data3"]) > 10)
                             values["active"] = active
 
@@ -565,7 +619,7 @@ def processBuffer(data):
         return values
     except Exception as e:
         print(e)
-        print(data)
+        #print(data)
         return {"data0": [], "data1": [], "data2": [], "data3": [], "active": False}
 
 
@@ -589,11 +643,13 @@ def server(sensor_q):
         s.listen()
 
         print(f"Server listening on {HOST}:{PORT}")
-
+        
+        connections = []
+        
         try:
             while True:
                 conn, addr = s.accept()
-
+                
                 t = threading.Thread(
                     target=handle_client,
                     args=(sensor_q, conn, addr),
@@ -643,10 +699,10 @@ def lighthouse(sensor_q):
 
                 print(f"MAC Address found: {mac} from '{host}'")
 
-                ##if mac not in i2c_ADDRESSES:
-                ##    print(" === Unassigned device (not found in i2c_ADDRESSES)")
+#                 if mac not in i2c_ADDRESSES:
+#                     print(" === Unassigned device (not found in i2c_ADDRESSES)")
 
-                ##mac_adderesses[host] = mac
+#                 mac_adderesses[host] = mac
                 s.sendto(b"lighthouse", (host, port))
 
         except KeyboardInterrupt:
@@ -654,7 +710,11 @@ def lighthouse(sensor_q):
             return
 
 
-def main():
+def main():    
+    args = parser.parse_args()
+    if args.port:
+        PORT = args.port
+    
     # raw sensor data is collected by 'handle_client' threads and sent
     # to the Translator over 'sensor_q'
     sensor_q = multiprocessing.Queue()
@@ -670,6 +730,7 @@ def main():
         decision_params,
         translator_params,
         load_latest=args.load,
+        save_trace=args.trace,
     )
     translator.start()
 
