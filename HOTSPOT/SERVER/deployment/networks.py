@@ -168,8 +168,6 @@ class Buffer:
             )
             
     def to_dict(self) -> Dict[str, np.ndarray]:
-        print("Buffer.to_dict()")
-
         return {
             "state": np.copy(self.state),
             "action": np.copy(self.action),

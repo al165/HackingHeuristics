@@ -1,21 +1,29 @@
-# IP Address of the ESP controlling the Stimulators
-STIM_ADDR = "192.168.178.68"
+# This servers details
+HOST = '192.168.2.9'
+PORT = 8080
 
-# i2c Address book:
-#    MAC ADDRESS  : (i2c ADDR, CHANNEL, ESP No.)
 
-i2c_ADDRESSES = {
-    "78:21:84:80:A3:E0": (0x1B, 1, 0),  # ESP 0
-    "EC:62:60:9C:C0:A4": (0x1D, 2, 1),  # ESP 1
-    "24:D7:EB:14:F8:70": (0x1B, 2, 2),  # ESP 2
-    "40:22:D8:7A:27:D8": (0x1C, 1, 3),  # ESP 3
-    "C0:49:EF:E4:60:BC": (0x1D, 1, 4),  # ESP 4
-    "EC:62:60:9D:2A:B0": (0x1A, 2, 5),  # ESP 5
-    "94:E6:86:05:13:4C": (0x1A, 1, 6),  # ESP 6
-    #"24:D7:EB:14:F1:08": (0x1A, 1, 6),  # ESP 6
-    "94:E6:86:03:A3:C4": (0x1C, 2, 7),  # ESP 7
-    "C4:4F:33:65:DA:79": (0x1A, 1, 0),  # DEBUG ESP 0
-    "E8:DB:84:C5:C2:B5": (0x1A, 2, 1),  # DEBUG ESP 1
+# Multicast
+MCAST_GRP = '224.3.29.71'
+MCAST_PORT = 10000
+
+
+# ESP and their stations
+#         MAC ADDRESS  : (station, id)
+STATIONS = {
+    "78:21:84:80:A3:E0": (0, 0),
+    "EC:62:60:9C:C0:A4": (0, 6),
+    "24:D7:EB:14:F8:70": (1, 1),
+    "40:22:D8:7A:27:D8": (1, 7),
+    "C0:49:EF:E4:60:BC": (2, 2),
+    "EC:62:60:9D:2A:B0": (2, 8),
+    "94:E6:86:05:13:4C": (3, 3),
+    "94:E6:86:03:A3:C4": (3, 9),
+    "C4:4F:33:65:DA:79": (4, 4),
+    "E8:DB:84:C5:C2:B5": (4, 10),
+    "C4:4F:33:65:DA:80": (5, 5),
+    "E8:DB:84:C5:C2:B6": (5, 11),
+    "FF:FF:FF:FF:FF:FF": (13, 13),
 }
 
 
@@ -31,6 +39,9 @@ CHECKPOINT_PATH = "../checkpoints"
 # Save checkpoint every 4 hours:
 #CHECKPOINT_INTERVAL = 4
 CHECKPOINT_INTERVAL = 60 * 60 * 4
+
+# Update feature vectors every 4 seconds:
+UPDATE_TIME = 4
 
 # Data information
 DATA_KEYS = ["data0", "data1", "data2", "data3"]
@@ -69,6 +80,8 @@ OUTPUT_VECTOR = [
     "idly",
     "temp1",
     "temp2",
+    "airon",
+    "airtime",
 ]
 
 OUTPUT_VECTOR_RANGES = {
@@ -78,4 +91,6 @@ OUTPUT_VECTOR_RANGES = {
     "idly": [0, 255],
     "temp1": [-2, 2],
     "temp2": [-2, 2],
+    "airon": [0, 1],
+    "airtime": [0, 10],
 }

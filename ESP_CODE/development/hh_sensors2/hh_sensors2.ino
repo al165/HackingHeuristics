@@ -386,7 +386,7 @@ void loop() {
   static long timer = 0;
   timer -= interval;
 
-  if(present > tempOffTime{
+  if(present > tempOffTime){
     turnTempsOff();
   }
 
