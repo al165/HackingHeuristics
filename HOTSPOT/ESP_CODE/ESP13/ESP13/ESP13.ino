@@ -1,13 +1,16 @@
 #include "Arduino.h"
 
 #if defined(ESP32)
+// ------- ESP32 constants ---------------------
+#include <AsyncUDP.h>
 #define LED_BUILTIN 2
 #else
+// ------- ESP8266 constants -------------------
+#include <ESPAsyncUDP.h>
 #define LED_BUILTIN 16
 #endif
 
 #include <WiFiManager.h>
-#include <AsyncUDP.h>
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 #include <Wire.h>
@@ -139,7 +142,11 @@ void setup() {
     digitalWrite(VALVE_PINS[count], LOW);
   }
 
-  WiFi.mode(WIFI_MODE_APSTA);
+#if defined(ESP32)
+  WiFi.mode(WIFI_MODE_STA);
+#else
+  WiFi.mode(WIFI_STA);
+#endif
 
   if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
     Serial.println("connected!");

@@ -9,12 +9,15 @@
 #include "Arduino.h"
 
 #if defined(ESP32)
+// ------- ESP32 constants ---------------------
+#include <AsyncUDP.h>
 #define LED_BUILTIN 2
 #else
+// ------- ESP8266 constants -------------------
+#include <ESPAsyncUDP.h>
 #define LED_BUILTIN 16
 #endif
 
-#include <AsyncUDP.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
@@ -165,7 +168,7 @@ bool turnValveOff(void *){
 
 bool setValveState(void* state){
   Serial.print("setValveState ");
-  Serial.println(state);
+  Serial.println((int) state);
   valveState = (int) state; 
   return true;
 }
@@ -178,7 +181,11 @@ void setup() {
   pinMode(VALVE_PIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
+#if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
+#else
+  WiFi.mode(WIFI_STA);
+#endif
 
   if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
     Serial.println("connected!");

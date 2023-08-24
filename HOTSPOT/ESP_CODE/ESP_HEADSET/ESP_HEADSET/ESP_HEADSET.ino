@@ -9,8 +9,9 @@
 #include "Arduino.h"
 
 #if defined(ESP32)
-#include <HTTPClient.h>
 // ------- ESP32 constants ---------------------
+#include <HTTPClient.h>
+#include <AsyncUDP.h>
 #define LED_BUILTIN 2
 const int SENSOR0 = 34;  // EEG
 const int SENSOR1 = 32;  // EOG
@@ -22,8 +23,10 @@ const int MAX_ANALOG_INPUT = 4095;
 #define BIN1 26
 #define BIN2 27
 #else
-#include <ESP8266HTTPClient.h>
 // ------- ESP8266 constants -------------------
+#include <ESP8266HTTPClient.h>
+#include <ESPAsyncUDP.h>
+// #include <ESP8266WiFi.h>
 #define LED_BUILTIN 16
 const int SENSOR0 = A0;  // EEG
 const int SENSOR1 = A0;  // EOG
@@ -43,7 +46,6 @@ const int MAX_ANALOG_INPUT = 1023;
 
 #include <WiFiClient.h>
 #include <WiFiManager.h>
-#include <AsyncUDP.h>
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 
@@ -100,6 +102,7 @@ auto blink_timer = timer_create_default();
 
 bool ping(void *){
   udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac.c_str());
+  Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac.c_str());
   return true;
 }
 
@@ -138,6 +141,7 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
+      Serial.println("disconnect");
     }
 
     blink_timer.cancel();
@@ -273,7 +277,11 @@ void setup() {
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, LOW);
 
+#if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
+#else
+  WiFi.mode(WIFI_STA);
+#endif
 
   if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
     Serial.println("connected!");
@@ -331,6 +339,7 @@ String getMac() {
 }
 
 void connect(){
-  sprintf(SERVER_URL, "http://%s:%u/", host.toString(), port);
+  Serial.println("connect");
+  sprintf(SERVER_URL, "http://%s:%u/", host.toString().c_str(), port);
   connected = true;
 }

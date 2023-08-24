@@ -46,7 +46,15 @@ from config import (
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--port", type=int, default=8080, required=False)
+parser.add_argument(
+    "-p", 
+    "--port",
+    metavar="port",
+    type=int, 
+    default=8080, 
+    required=False,
+    help="port to start HTTP listening server on",
+)
 parser.add_argument(
     "--load",
     action="store_true",
@@ -56,11 +64,19 @@ parser.add_argument(
 )
 parser.add_argument(
     "-t", 
-    "--trace", 
+    "--trace",
     default=False, 
     required=False, 
     action="store_true", 
-    help="save .csv files tracing agent's state"
+    help="save .csv files tracing agent's state",
+)
+parser.add_argument(
+    "--host", 
+    metavar="host",
+    type=str,
+    default="",
+    required=False, 
+    help="host IP to start HTTP listening server on",
 )
 
 
@@ -594,10 +610,27 @@ def multicast_listener(mcast_socket, msg_q):
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+def getInterfaceIP(name="wlan0"):
+    from subprocess import check_output
+
+    output = check_output(["ip", "-j", "addr", "show", name])
+    d = json.loads(output)
+
+    return d[0]['addr_info'][0]['local']
+
+
 def main():
+    global HOST, PORT
+
     args = parser.parse_args()
     if args.port:
         PORT = args.port
+
+    if args.host:
+        HOST = args.host
+    elif HOST == '':
+        HOST = getInterfaceIP()
+        print(HOST)
 
     multicast_group = (
         MCAST_GRP,
