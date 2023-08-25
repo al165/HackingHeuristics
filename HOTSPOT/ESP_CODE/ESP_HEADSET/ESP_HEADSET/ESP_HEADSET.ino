@@ -140,7 +140,6 @@ bool readPins(void *){
     active = (float) avg_active / DATA_LENGTH > 8.0;
 
     char output[2048];
-
     serializeJson(doc, output);
     
     data_ptr = 0;

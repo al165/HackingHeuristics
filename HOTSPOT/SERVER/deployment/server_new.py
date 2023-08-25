@@ -201,9 +201,19 @@ class Translator(multiprocessing.Process):
         print("Translator init done")
 
     def getActiveAgents(self) -> Dict[str, Agent]:
-        active = dict(
-            [(host, agent) for host, agent in self.agents.items() if agent.active]
-        )
+        active = dict()
+
+        now = time()
+        for host, agent in self.agents.items():
+            if not agent.active:
+                continue
+
+            if now > agent.last_ping_time + 30:
+                print(f"ESP {agent.id} inactive for 30 seconds, deactivating")
+                agent.active = False
+                continue
+
+            active[host] = agent
         return active
 
     @staticmethod
@@ -235,6 +245,10 @@ class Translator(multiprocessing.Process):
         data = dict()
 
         for _, agent in self.agents.items():
+            if not agent.active:
+                print(f"agent {agent.id} inactive, skipping output")
+                continue
+
             parameters = dict()
             try:
                 y = agent.output_vectors[-1]
