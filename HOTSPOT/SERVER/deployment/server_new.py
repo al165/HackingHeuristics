@@ -14,10 +14,8 @@ from time import time, sleep
 from datetime import datetime
 from collections import deque
 from typing import Dict, List, Tuple
-from dataclasses import dataclass, field, asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from dataclasses_json import dataclass_json, config
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import numpy as np
@@ -45,6 +43,8 @@ from config import (
     MCAST_GRP,
     MCAST_PORT,
 )
+
+from esp_types import ESP, Agent
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -91,7 +91,6 @@ INPUT_MAX = 4096
 BUFFERSIZE = 1024
 MAX_PLOT_SAMPLES = 4000
 MAX_PLOT_FRAMES = samples_to_frames(MAX_PLOT_SAMPLES, hop_length=HOP_LENGTH)
-
 
 
 processors = {
@@ -156,32 +155,6 @@ translator_params = {
 }
 
 
-@dataclass_json
-@dataclass
-class Agent:
-    ip: str
-    port: int
-    mac: str
-    id: int
-    map: deque = field(
-        default_factory=lambda: deque(maxlen=8)
-    )  # , metadata=config(encoder=list))
-    active: bool = False
-    highlight: bool = False
-    station: int = -1
-    sensor_data: Dict = field(default_factory=dict)
-    feature_vectors: deque = field(
-        default=deque(maxlen=8), metadata=config(encoder=list)
-    )
-    output_vectors: deque = field(
-        default=deque(maxlen=8), metadata=config(encoder=list)
-    )
-
-    def __post_init__(self):
-        self.map.append(np.array([0.0, 0.0]))
-
-
-
 class Translator(multiprocessing.Process):
     def __init__(
         self,
@@ -198,9 +171,6 @@ class Translator(multiprocessing.Process):
         super(Translator, self).__init__()
         self.msg_q = msg_q
         self.plot_q = plot_q
-
-        # self.last_output_time = dict()
-
 
         self.save_trace = save_trace
 
@@ -290,9 +260,6 @@ class Translator(multiprocessing.Process):
         if self.mcast_socket is None:
             return
 
-        print("Broadcasting:")
-        print(data)
-
         json_data = json.dumps(data)
         sent = self.mcast_socket.sendto(bytes(json_data, 'utf-8'), (MCAST_GRP, MCAST_PORT))
 
@@ -303,7 +270,7 @@ class Translator(multiprocessing.Process):
             print(f"Agent with MAC {mac} not in STATIONS (in config.py)!")
             return
 
-        station, id_ = STATIONS[mac]
+        station, id_, esp_type = STATIONS[mac]
 
         agent = Agent(
             id=id_,
@@ -311,6 +278,7 @@ class Translator(multiprocessing.Process):
             port=port,
             mac=mac,
             station=station,
+            esp_type=esp_type,
         )
         
         self.connections[id_] = (mac, host, port)
@@ -319,7 +287,7 @@ class Translator(multiprocessing.Process):
 
         self.agents[host] = agent
         self.updated = True
-        print(f"** new agent added (ESP {id_}) **")
+        print(f"** new agent added (ESP {id_}, {esp_type.name}, {mac}, {host}:{port}) **")
 
         data = dict()
         data[mac] = {"type": "whoami", "station": station}
@@ -367,6 +335,8 @@ class Translator(multiprocessing.Process):
             mac = msg["mac"]
             self.create_agent(mac, host, port)
 
+        self.agents[host].last_ping_time = time()
+
     def handleSensorMessage(self, msg, host, port):
         if host not in self.agents:
             print("not in self.agents")
@@ -397,7 +367,6 @@ class Translator(multiprocessing.Process):
 
         for host, agent in self.getActiveAgents().items():
             features = dict()
-            print(host)
             try:
                 for name in DATA_NAME_MAP.values():
                     buffer = agent.sensor_data[name]
@@ -474,7 +443,7 @@ class Translator(multiprocessing.Process):
             try:
                 self.collect()
                 self.updatePlotQueue() 
-                sleep(0.2)
+                # sleep(0.2)
             except KeyboardInterrupt:
                 self.save()
                 self.running.clear()
@@ -711,7 +680,7 @@ def main():
 
     httpd.shutdown()
     scheduler.shutdown()
-    translator.join(0.2)
+    translator.join()
 
     print("\nDONE")
 
