@@ -49,6 +49,14 @@ const int MAX_ANALOG_INPUT = 1023;
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define SCREEN_WIDTH 128 
+#define SCREEN_HEIGHT 64 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+String screenMessage;
+
 const char* WIFI_NAME = "H369A09B46E";
 const char* WIFI_PWD = "2FF3F4323667";
 
@@ -95,7 +103,7 @@ const long TEMP_ON = 5000;
 bool ignoreTemp = false;
 
 // timer to simplify scheduling events
-Timer<2> timer;
+Timer<6> timer;
 
 auto blink_timer = timer_create_default();
 
@@ -192,8 +200,9 @@ void parsePacket(AsyncUDPPacket packet){
     JsonObject details = obj[mac];
     if(details.containsKey("station")){
       station = details["station"].as<String>();
-      Serial.print("updated station to ");
-      Serial.println(station);
+      // sprintf(screenMessage, "* station %s *", station.c_str());
+      screenMessage = "* station: " + station + " *";
+      timer.in(2000, [](void*) -> bool {screenMessage = ""; return true;});
     }
   }
 
@@ -202,10 +211,6 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   JsonObject parameters = obj[station];
-  // String output;
-  // serializeJson(parameters, output);
-  // Serial.println("recieved parameters:");
-  // Serial.println(output);
 
   // LED Indicator
   if(parameters.containsKey("highlight")){
@@ -277,6 +282,12 @@ void setup() {
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, LOW);
 
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
+
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
 #else
@@ -301,11 +312,18 @@ void setup() {
 
   mac = getMac();
 
-  Serial.print("MAC: ");
+  Serial.println("**********");
+  Serial.print(" MAC: ");
   Serial.println(mac);
+  Serial.println("**********");
+
+  // sprintf(screenMessage, "* MAC %s *", mac.c_str());
+  screenMessage = "* MAC " + mac + " *";
+  timer.in(4000, [](void*) -> bool {screenMessage = ""; return true;});
 
   timer.every(10000, ping);
   timer.every(1000/SAMPLE_RATE, readPins);
+  timer.every(100, updateScreen);
 
 
   JsonObject server = doc.createNestedObject("server");
@@ -326,6 +344,40 @@ void loop() {
   blink_timer.tick();
 }
 
+bool updateScreen(void*) {
+  display.clearDisplay();
+  
+  int maxRadius = min(display.width(), display.height());
+ 
+  int r0 = map(read0, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r1 = map(read1, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r2 = map(read2, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  int r3 = map(read3, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+ 
+  int x0 = 10;
+  int y0 = display.height() / 2;
+
+  int x1 = 40;
+  int x2 = 70;
+  int x3 = 100;
+
+  display.fillCircle(x0, y0,  r0, SSD1306_WHITE);
+  display.fillCircle(x1, y0,  r1, SSD1306_WHITE);
+  display.fillCircle(x2, y0,  r2, SSD1306_WHITE);
+  display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
+
+  // show message
+  display.setTextSize(2);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(10, 20);
+  display.println(screenMessage);
+
+  display.display(); 
+
+  return true;
+}
+
+
 String getMac() {
   byte baseMac[6];
   WiFi.macAddress(baseMac);
@@ -339,7 +391,8 @@ String getMac() {
 }
 
 void connect(){
-  Serial.println("connect");
   sprintf(SERVER_URL, "http://%s:%u/", host.toString().c_str(), port);
+  Serial.print("connect: ");
+  Serial.println(SERVER_URL);
   connected = true;
 }
