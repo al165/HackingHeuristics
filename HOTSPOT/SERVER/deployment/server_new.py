@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from dataclasses_json import dataclass_json, config
+from apscheduler.schedulers.background import BackgroundScheduler
 
 import numpy as np
 from librosa import samples_to_frames, samples_to_time, frames_to_time
@@ -608,15 +609,20 @@ def multicast_listener(mcast_socket, msg_q):
                 msg_q.put((addr, json_data["server"]))
 
 
-from apscheduler.schedulers.background import BackgroundScheduler
 
-def getInterfaceIP(name="wlan0"):
+def getInterfaceIP(interface="wlan0"):
     from subprocess import check_output
 
-    output = check_output(["ip", "-j", "addr", "show", name])
+    output = check_output(["ip", "-j", "addr", "show", interface])
     d = json.loads(output)
 
-    return d[0]['addr_info'][0]['local']
+    try:
+        host = d[0]['addr_info'][0]['local']
+    except (IndexError, KeyError):
+        print(f"** Cannot establish interface {interface} IP address. Defaulting to localhost")
+        host = '127.0.0.1'
+
+    return host
 
 
 def main():
@@ -630,7 +636,6 @@ def main():
         HOST = args.host
     elif HOST == '':
         HOST = getInterfaceIP()
-        print(HOST)
 
     multicast_group = (
         MCAST_GRP,
@@ -640,6 +645,12 @@ def main():
     mcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     mcast_socket.settimeout(0.2)
     mcast_socket.bind(multicast_group)
+
+    print()
+    print("="*50)
+    print(f"  Multicast group:   {MCAST_GRP}:{MCAST_PORT}")
+    print("="*50)
+    print()
 
     group = socket.inet_aton(multicast_group[0])
     mreq = struct.pack('4sL', group, socket.INADDR_ANY)
@@ -659,7 +670,6 @@ def main():
     scheduler.add_job(add_message, 'interval', args=({"type": "features"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=({"type": "output"},), seconds=UPDATE_TIME)
 
-    # Translator processes sensor data and makes stimulator outputs
     translator = Translator(
         msg_q,
         None,
@@ -670,16 +680,27 @@ def main():
         load_latest=args.load,
         save_trace=args.trace,
     )
-    translator.start()
 
     handler_class = makeHTTPServer(msg_q)
     httpd = HTTPServer((HOST, PORT), handler_class)
-
-    scheduler.start()
-
     http_thread = threading.Thread(target=httpd.serve_forever)
     http_thread.daemon = True
+
+    print()
+    print("="*50)
+    print(f"  HTTP Server:       {HOST}:{PORT}")
+    print("="*50)
+    print()
+
+    translator.start()
+    scheduler.start()
     http_thread.start()
+
+    print()
+    print("READY")
+    print()
+    print("Received messages:")
+    print("-"*50)
 
     try:
         multicast_listener(mcast_socket, msg_q)
