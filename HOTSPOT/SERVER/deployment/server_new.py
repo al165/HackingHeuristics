@@ -26,6 +26,7 @@ import torch
 import data_processors as dp
 from networks import LinearNetwork, VAENetwork, SACModel
 
+from esp_types import Agent
 from config import (
     HOST,
     PORT,
@@ -44,7 +45,6 @@ from config import (
     MCAST_PORT,
 )
 
-from esp_types import ESP, Agent
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -138,7 +138,7 @@ embedder_params = {
 }
 
 decision_params = {
-    "sizes": [2, 8, 8, 4],
+    "sizes": [2, 8, 12, 8],
     "batchnorm": True,
 }
 
@@ -149,7 +149,7 @@ translator_params = {
     "hid_shape": (12, 12),
     "a_lr": 0.0001,
     "c_lr": 0.0001,
-    "batch_size": 1,
+    "batch_size": 4,
     "alpha": 0.12,
     "adaptive_alpha": False,
 }

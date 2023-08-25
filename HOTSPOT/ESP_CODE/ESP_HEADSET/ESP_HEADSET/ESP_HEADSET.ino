@@ -97,6 +97,7 @@ int read3 = 0;
 // Active status and timers
 bool active = true;
 int avg_active = 0;
+bool sleep_post = false;
 
 // Temperature "on" time
 const long TEMP_ON = 5000;
@@ -110,8 +111,15 @@ auto blink_timer = timer_create_default();
 
 bool ping(void *){
   udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac.c_str());
-  Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac.c_str());
+  blink();
+  // Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac.c_str());
   return true;
+}
+
+void blink(){
+  blink_timer.cancel();
+  digitalWrite(LED_BUILTIN, HIGH);
+  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
 bool readPins(void *){
@@ -138,7 +146,8 @@ bool readPins(void *){
     data_ptr = 0;
     avg_active = 0;
 
-    if(!connected){
+    if(!connected || sleep_post){
+      sleep_post = !active;
       return true;
     }
 
@@ -149,14 +158,13 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
-      Serial.println("disconnect");
+      Serial.print(httpResponseCode);
+      Serial.println("  disconnect");
     }
-
-    blink_timer.cancel();
-    digitalWrite(LED_BUILTIN, HIGH);
-    blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
-    
     http.end();
+    blink();
+
+    sleep_post = !active;
   }
 
   return true;
@@ -175,8 +183,10 @@ bool turnTempsOff(void *){
 void parsePacket(AsyncUDPPacket packet){
   String data(reinterpret_cast<char *>(packet.data()));
 
-  Serial.println("--------");
-  Serial.println(data);
+  // Serial.println("--------");
+  // Serial.println(data);
+
+  blink();
 
   DynamicJsonDocument doc(1024);
   DeserializationError error = deserializeJson(doc, data);
