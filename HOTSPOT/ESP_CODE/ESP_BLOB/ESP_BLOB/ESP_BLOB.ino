@@ -27,9 +27,6 @@
 
 #define VALVE_PIN 15
 
-const char* WIFI_NAME = "H369A09B46E";
-const char* WIFI_PWD = "2FF3F4323667";
-
 WiFiManager wm;
 AsyncUDP udp;
 
@@ -39,11 +36,21 @@ const int UDP_PORT = 10000;
 String mac;
 String station;
 
+// Stimulator loop that continuously updates the AMP value of
+// the Neurostimduino
+TaskHandle_t Loop2;
+
+int rampStates = 0;
+int rampVals = 0;
+int targetVals = 0;
+
+const int RAMP_TIME = 300;
+
 // timer to simplify scheduling events
 Timer<4> timer;
 
-const int MAX_AIR_TIME = 10;
-const int AIR_ON_WAIT = 10;
+const int MAX_AIR_TIME = 8;
+const int AIR_ON_WAIT = 5;
 float airTime = 0;
 Timer<> air_timer;
 // 0: off and ready, 1: off and cooling down, 2: on
@@ -57,7 +64,6 @@ bool ping(void *){
   blink();
   return true;
 }
-
 
 void blink(){
   blink_timer.cancel();
@@ -97,13 +103,22 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  JsonObject parameters = obj[mac];
+  JsonObject parameters = obj[station];
   String output;
   serializeJson(parameters, output);
-  Serial.println("recieved parameters:");
   Serial.println(output);
 
   int last_error = -1;
+
+  if (parameters.containsKey("ampl")) {
+    int val = parameters["ampl"];
+    if (rampVals > 0) {
+      rampStates = -1;
+    } else {
+      rampStates = 1;
+    }
+    targetVals = val;
+  }
 
   if (parameters.containsKey("freq")) {
     int val = parameters["freq"];
@@ -143,13 +158,15 @@ void parsePacket(AsyncUDPPacket packet){
       val = (float) MAX_AIR_TIME;
     }
 
-    if(val < 0.5 && valveState == 2){
-      turnValveOff(0);
-    } else if(val >= 0.5 && valveState == 0) {
+    // if(val < 0.5 && valveState == 2){
+    //   turnValveOff(0);
+    // }
+    if(val >= 0.5 && valveState == 0) {
       valveState = 2;
       digitalWrite(VALVE_PIN, HIGH);
+      Serial.println("turnValveOn");
       
-      air_timer.in((int)(val * 1000), turnValveOff);
+      air_timer.in((int)(airTime * 1000), turnValveOff);
     } 
   }
 
@@ -158,18 +175,17 @@ void parsePacket(AsyncUDPPacket packet){
 
 
 bool turnValveOff(void *){
-  air_timer.cancel();
+  Serial.println("turnValveOff");
+  //air_timer.cancel();
   digitalWrite(VALVE_PIN, LOW);
   valveState = 1;
 
-  air_timer.in((int)(AIR_ON_WAIT * 1000), setValveState, (void*) 0);
+  air_timer.in((int)(AIR_ON_WAIT * 1000), setValveAvaliable);
   return true;
 }
 
-bool setValveState(void* state){
-  Serial.print("setValveState ");
-  Serial.println((int) state);
-  valveState = (int) state; 
+bool setValveAvaliable(void*){
+  valveState = 0; 
   return true;
 }
 
@@ -181,13 +197,15 @@ void setup() {
   pinMode(VALVE_PIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
+  NSWire.begin();
+
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
 #else
   WiFi.mode(WIFI_STA);
 #endif
 
-  if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
+  if(wm.autoConnect()){
     Serial.println("connected!");
   } else {
     Serial.println("config portal running...");
@@ -209,13 +227,48 @@ void setup() {
   Serial.println(mac);
 
   timer.every(10000, ping);
+  timer.every(RAMP_TIME, updateRamp);
   ping(0);
+
+  udp.print("{\"server\":{\"type\": \"whoami\"}}");
 
 }
 
 void loop() {
   timer.tick();
   air_timer.tick();
+}
+
+bool updateRamp(void *) {
+
+  if (rampStates == -1) {
+    if (rampVals == 0) {
+      rampStates = 1;
+    } else {
+      rampVals -= 1;
+      setAmplitude(1, rampVals);
+      setAmplitude(2, rampVals);
+
+      startStimulation(1, 2);
+      startStimulation(2, 2);
+    }
+  } else if (rampStates == 1) {
+    if (rampVals >= targetVals) {
+      rampStates = 0;
+    } else {
+      rampVals += 1;
+      setAmplitude(1, rampVals);
+      setAmplitude(2, rampVals);
+
+      startStimulation(1, 2);
+      startStimulation(2, 2);
+    }
+  } else {
+    // Serial.println("no change");
+    
+  }
+
+  return true;
 }
 
 String getMac() {
@@ -233,7 +286,7 @@ String getMac() {
 
 // NeuroStimDuino Stuff here ----------------------------
 uint8_t setAmplitude(uint8_t channel, int val) {
-  Serial.print("setAmplitude, status ");
+  // Serial.print("setAmplitude, status ");
 
   if (val < AMPL_LOW_LIMIT || val > 10) {
     Serial.print("value outside of range: ");
@@ -249,12 +302,12 @@ uint8_t setAmplitude(uint8_t channel, int val) {
 
   uint8_t i2c_error = I2Cwrite(ThreeBytesCommds, AMPL, channel, val, -1);
 
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 
 uint8_t setFrequency(uint8_t channel, int val) {
-  Serial.print("setFrequency, status ");
+  // Serial.print("setFrequency, status ");
 
   if (val < FREQ_LOW_LIMIT || val > FREQ_UPP_LIMIT) {
     Serial.print("value outside of range: ");
@@ -271,12 +324,12 @@ uint8_t setFrequency(uint8_t channel, int val) {
   //  uint8_t val_lsb = (val & 255);
   //  uint8_t val_msb = ((val >> 8) & 255);
   uint8_t i2c_error = I2Cwrite(ThreeBytesCommds, FREQ, channel, val, -1);
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 
 uint8_t setDuration(uint8_t channel, int val) {
-  Serial.print("setDuration, status ");
+  // Serial.print("setDuration, status ");
 
   if (val < DURN_LOW_LIMIT || val > DURN_UPP_LIMIT) {
     Serial.print("value outside of range: ");
@@ -294,12 +347,12 @@ uint8_t setDuration(uint8_t channel, int val) {
   uint8_t val_msb = ((val >> 8) & 255);
   uint8_t i2c_error = I2Cwrite(FourBytesCommds, DURN, channel, val_lsb, val_msb);
 
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 
 uint8_t setInterPhaseDelay(uint8_t channel, int val) {
-  Serial.print("setInterPhaseDelay, status ");
+  // Serial.print("setInterPhaseDelay, status ");
 
   if (val < IDLY_LOW_LIMIT || val > IDLY_UPP_LIMIT) {
     Serial.print("value outside of range: ");
@@ -314,7 +367,7 @@ uint8_t setInterPhaseDelay(uint8_t channel, int val) {
   }
 
   uint8_t i2c_error = I2Cwrite(ThreeBytesCommds, IDLY, channel, val, -1);
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 
@@ -324,10 +377,10 @@ uint8_t startPulse(uint8_t channel) {
 }
 
 uint8_t enable(uint8_t channel, int val) {
-  Serial.print("enable, status ");
+  // Serial.print("enable, status ");
 
   uint8_t i2c_error = I2Cwrite(ThreeBytesCommds, ENAB, channel, val, -1);
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 
@@ -336,7 +389,7 @@ uint8_t startStimulation(uint8_t channel, uint8_t val) {
   uint8_t flag;
   flag = 0;
 
-  Serial.print("startStimulation, status ");
+  // Serial.print("startStimulation, status ");
 
   if (val < 0 || val > 255) {
     Serial.print("value outside of range: ");
@@ -351,7 +404,7 @@ uint8_t startStimulation(uint8_t channel, uint8_t val) {
   }
   uint8_t i2c_error = I2Cwrite(FourBytesCommds, STIM, channel, val, flag);
 
-  Serial.println(i2c_error);
+  // Serial.println(i2c_error);
   return i2c_error;
 }
 

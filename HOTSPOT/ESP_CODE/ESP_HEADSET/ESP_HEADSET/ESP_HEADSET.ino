@@ -57,9 +57,6 @@ const int MAX_ANALOG_INPUT = 1023;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 String screenMessage;
 
-const char* WIFI_NAME = "H369A09B46E";
-const char* WIFI_PWD = "2FF3F4323667";
-
 WiFiManager wm;
 AsyncUDP udp;
 
@@ -139,8 +136,9 @@ bool readPins(void *){
   if(data_ptr >= DATA_LENGTH) {
     active = (float) avg_active / DATA_LENGTH > 8.0;
 
-    char output[2048];
+    char output[4096];
     serializeJson(doc, output);
+    // Serial.println(output);
     
     data_ptr = 0;
     avg_active = 0;
@@ -157,8 +155,8 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
-      Serial.print(httpResponseCode);
-      Serial.println("  disconnect");
+      // Serial.print(httpResponseCode);
+      // Serial.println("  disconnect");
     }
     http.end();
     blink();
@@ -303,7 +301,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
 #endif
 
-  if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
+  if(wm.autoConnect()){
     Serial.println("connected!");
   } else {
     Serial.println("config portal running...");
@@ -356,29 +354,36 @@ void loop() {
 bool updateScreen(void*) {
   display.clearDisplay();
   
-  int maxRadius = min(display.width(), display.height());
+  // int maxRadius = min(display.width(), display.height());
  
-  int r0 = map(read0, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  int r1 = map(read1, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  int r2 = map(read2, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  int r3 = map(read3, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r0 = map(read0, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r1 = map(read1, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r2 = map(read2, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r3 = map(read3, 0, MAX_ANALOG_INPUT, 0, maxRadius);
  
-  int x0 = 10;
-  int y0 = display.height() / 2;
+  // int x0 = 10;
+  // int y0 = display.height() / 2;
 
-  int x1 = 40;
-  int x2 = 70;
-  int x3 = 100;
+  // int x1 = 40;
+  // int x2 = 70;
+  // int x3 = 100;
 
-  display.fillCircle(x0, y0,  r0, SSD1306_WHITE);
-  display.fillCircle(x1, y0,  r1, SSD1306_WHITE);
-  display.fillCircle(x2, y0,  r2, SSD1306_WHITE);
-  display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
+  // display.fillCircle(x0, y0,  r0, SSD1306_WHITE);
+  // display.fillCircle(x1, y0,  r1, SSD1306_WHITE);
+  // display.fillCircle(x2, y0,  r2, SSD1306_WHITE);
+  // display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
 
   // show message
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(10, 20);
+  display.setCursor(64, 10);
+  display.println(read0);
+  display.setCursor(64, 20);
+  display.println(read1);
+  display.setCursor(64, 30);
+  display.println(read2);
+  display.setCursor(64, 40);
+  display.println(read3);
   display.println(screenMessage);
 
   display.display(); 
@@ -401,7 +406,7 @@ String getMac() {
 
 void connect(){
   sprintf(SERVER_URL, "http://%s:%u/", host.toString().c_str(), port);
-  Serial.print("connect: ");
-  Serial.println(SERVER_URL);
+  // Serial.print("connect: ");
+  // Serial.println(SERVER_URL);
   connected = true;
 }

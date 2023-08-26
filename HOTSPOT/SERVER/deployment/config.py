@@ -13,8 +13,8 @@ MCAST_PORT = 10000
 # ESP and their stations
 #         MAC ADDRESS  : (station, id, type)
 STATIONS = {
-    "78:21:84:80:A3:E0": (0, 0, ESP.HEADSET),   # HEADSET 0
-    "EC:62:60:9C:C0:A4": (0, 6, ESP.BLOB),      # BLOB 0
+    "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0
+    "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0
     "3C:61:05:D1:87:EF": (1, 1, ESP.HEADSET),   # HEADSET 1
     "40:22:D8:7A:27:D8": (1, 7, ESP.BLOB),      # BLOB 1
     "C0:49:EF:E4:60:BC": (2, 2, ESP.HEADSET),   # HEADSET 2
@@ -25,7 +25,7 @@ STATIONS = {
     "E8:DB:84:C5:C2:B5": (4, 10, ESP.BLOB),     # BLOB 4
     "C4:4F:33:65:DA:80": (5, 5, ESP.HEADSET),   # HEADSET 5
     "E8:DB:84:C5:C2:B6": (5, 11, ESP.BLOB),     # BLOB 5
-    "FF:FF:FF:FF:FF:FF": (13, 13, ESP.ESP13),   # ESP13
+    "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
 }
 
 
@@ -87,12 +87,12 @@ OUTPUT_VECTOR = [
 ]
 
 OUTPUT_VECTOR_RANGES = {
-    "ampl": [3, 6],
+    "ampl": [1, 4],
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],
     "temp1": [-2, 2],
     "temp2": [-2, 2],
-    "airon": [0, 1],
-    "airtime": [0, 10],
+    "airon": [0, 1.0],
+    "airtime": [1, 5],
 }

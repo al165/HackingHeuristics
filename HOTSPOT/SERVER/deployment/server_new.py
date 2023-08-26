@@ -26,7 +26,7 @@ import torch
 import data_processors as dp
 from networks import LinearNetwork, VAENetwork, SACModel
 
-from esp_types import Agent
+from esp_types import Agent, ESP
 from config import (
     HOST,
     PORT,
@@ -205,6 +205,11 @@ class Translator(multiprocessing.Process):
 
         now = time()
         for host, agent in self.agents.items():
+            if agent.esp_type in (ESP.BLOB, ESP.ESP13):
+                agent.active = True
+                active[host] = agent
+                continue
+
             if not agent.active:
                 continue
 
@@ -245,6 +250,9 @@ class Translator(multiprocessing.Process):
         data = dict()
 
         for _, agent in self.agents.items():
+            if agent.esp_type in (ESP.BLOB, ESP.ESP13):
+                continue
+
             if not agent.active:
                 print(f"agent {agent.id} inactive, skipping output")
                 continue
@@ -258,10 +266,15 @@ class Translator(multiprocessing.Process):
             for i, name in enumerate(OUTPUT_VECTOR):
                 if name in ("temp1", "temp2", "highlight"):
                     parameters[name.lower()] = val
+                elif name in ("airon", "airtime"):
+                    val = np.clip(y[i], -1, 1)
+                    r = OUTPUT_VECTOR_RANGES[name]
+                    out = (val / 2.0 + 0.5) * (r[1] - r[0]) + r[0]
+                    parameters[name.lower()] = out
                 else:
                     val = np.clip(y[i], -1, 1)
                     r = OUTPUT_VECTOR_RANGES[name]
-                    out = int((val / 2 + 0.5) * (r[1] - r[0]) + r[0])
+                    out = int((val / 2.0 + 0.5) * (r[1] - r[0]) + r[0])
                     parameters[name.lower()] = out
 
             data[str(agent.station)] = parameters
@@ -275,7 +288,7 @@ class Translator(multiprocessing.Process):
             return
 
         json_data = json.dumps(data)
-        sent = self.mcast_socket.sendto(bytes(json_data, 'utf-8'), (MCAST_GRP, MCAST_PORT))
+        sent = self.mcast_socket.sendto(bytes(json_data, 'ascii'), (MCAST_GRP, MCAST_PORT))
 
     def create_agent(self, mac: str, host: str, port: int):
         """New agent connected"""
@@ -293,6 +306,7 @@ class Translator(multiprocessing.Process):
             mac=mac,
             station=station,
             esp_type=esp_type,
+            last_ping_time=time(),
         )
         
         self.connections[id_] = (mac, host, port)
@@ -329,7 +343,10 @@ class Translator(multiprocessing.Process):
                 self.updated = True
 
             elif msg_type == "whoami":
-                pass
+                mac = self.agents[host].mac
+                data = dict()
+                data[mac] = {"type": "whoami", "station": station}
+                self.broadcast(data)
 
             elif msg_type == "checkpoint":
                 self.save()
@@ -348,6 +365,7 @@ class Translator(multiprocessing.Process):
         if host not in self.agents:
             mac = msg["mac"]
             self.create_agent(mac, host, port)
+            return
 
         self.agents[host].last_ping_time = time()
 
@@ -380,6 +398,9 @@ class Translator(multiprocessing.Process):
         target = self.getCenter()
 
         for host, agent in self.getActiveAgents().items():
+            if agent.esp_type in (ESP.BLOB, ESP.ESP13):
+                continue
+
             features = dict()
             try:
                 for name in DATA_NAME_MAP.values():
@@ -533,7 +554,11 @@ def makeHTTPServer(msg_q):
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length)
 
-            json_data = post_data.decode('utf-8')
+            try:
+                json_data = post_data.decode('ascii')
+            except:
+                print("error decoding data")
+                self._set_response()
 
             addr = self.client_address
             values = processBuffer(json_data)
@@ -583,10 +608,10 @@ def multicast_listener(mcast_socket, msg_q):
             return
         else:
             try:
-                json_data = json.loads(data.decode('utf-8'))
+                json_data = json.loads(data.decode('ascii'))
                 print(json_data)
             except json.decoder.JSONDecodeError:
-                print("error parsing", data.decode('utf-8'))
+                print("error parsing", data.decode('ascii'))
 
             if "server" in json_data:
                 msg_q.put((addr, json_data["server"]))

@@ -17,9 +17,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-const char* WIFI_NAME = "H369A09B46E";
-const char* WIFI_PWD = "2FF3F4323667";
-
 WiFiManager wm;
 AsyncUDP udp;
 
@@ -39,7 +36,7 @@ int valveTimes[] = {0, 0, 0, 0, 0, 0};
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-Timer<4> timer;
+Timer<12> timer;
 Timer<> blink_timer;
 
 bool ping(void *){
@@ -56,17 +53,24 @@ void blink(){
 
 bool turnValveOff(void* station){
   digitalWrite(VALVE_PINS[(int)station], LOW);
-  valveState[(int)station] = 0;
+  valveState[(int)station] = 1;
+  Serial.println("turnValveOff");
+
+  timer.in((int) valveTimes[(int) station], setValveAvaliable, station);
   return true;
 }
 
+bool setValveAvaliable(void* station){
+  valveState[(int)station] = 0;
+  return true;
+}
 
 void parsePacket(AsyncUDPPacket packet){
   blink();
   String data(reinterpret_cast<char *>(packet.data()));
 
-  Serial.println("--------");
-  Serial.println(data);
+  // Serial.println("--------");
+  // Serial.println(data);
 
   DynamicJsonDocument doc(1024);
   DeserializationError error = deserializeJson(doc, data);
@@ -93,6 +97,9 @@ void parsePacket(AsyncUDPPacket packet){
     }
 
     JsonObject parameters = obj[name];
+    // String output;
+    // serializeJson(parameters, output);
+    // Serial.println("Station " + name + " " + output);
 
     if(parameters.containsKey("airtime")){
       float airtime = parameters["airtime"];
@@ -106,7 +113,7 @@ void parsePacket(AsyncUDPPacket packet){
       }
 
       display.clearDisplay();
-      display.setTextSize(4);
+      display.setTextSize(3);
       display.setTextColor(WHITE);
       display.setCursor(40, 20);
 
@@ -116,11 +123,14 @@ void parsePacket(AsyncUDPPacket packet){
       // } else 
       
       if(val >= 0.5 && valveState[station] == 0){
-        display.print(station);
+        display.print(name);
         display.println(": on");
+        digitalWrite(VALVE_PINS[station], HIGH);
+
+        Serial.println("valve " + name + " :on");
 
         valveState[station] = 2;
-        timer.in((int) (val * 1000), turnValveOff, (void *)station);
+        timer.in((int) valveTimes[station], turnValveOff, (void *)station);
       }
 
       display.display();
@@ -148,7 +158,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
 #endif
 
-  if(wm.autoConnect(WIFI_NAME, WIFI_PWD)){
+  if(wm.autoConnect()){
     Serial.println("connected!");
   } else {
     Serial.println("config portal running...");
@@ -176,6 +186,7 @@ void setup() {
   display.display(); 
 
   mac = getMac();
+  Serial.println("** MAC: " + mac);
   
   timer.every(10000, ping);
   ping(0);
