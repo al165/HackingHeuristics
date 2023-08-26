@@ -435,4 +435,5 @@ void connect(){
   // Serial.print("connect: ");
   // Serial.println(SERVER_URL);
   connected = true;
+  udp.print("{\"server\":{\"type\": \"whoami\"}}");
 }

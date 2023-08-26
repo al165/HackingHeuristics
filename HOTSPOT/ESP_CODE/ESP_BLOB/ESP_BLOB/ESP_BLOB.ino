@@ -255,7 +255,6 @@ void setup() {
   ping(0);
 
   udp.print("{\"server\":{\"type\": \"whoami\"}}");
-
 }
 
 void loop() {
@@ -264,7 +263,6 @@ void loop() {
 }
 
 bool updateRamp(void *) {
-
   if (rampStates == -1) {
     if (rampVals == 0) {
       rampStates = 1;
@@ -287,9 +285,6 @@ bool updateRamp(void *) {
       startStimulation(1, 2);
       startStimulation(2, 2);
     }
-  } else {
-    // Serial.println("no change");
-    
   }
 
   return true;
