@@ -577,9 +577,9 @@ def makeHTTPServer(msg_q):
                 if name not in processors:
                     continue
 
-                if name == "GSR" and len(values["data3"]) > 0:
-                    active = bool(np.mean(values["data3"]) > 8)
-                    values["active"] = active
+                # if name == "GSR" and len(values["data3"]) > 0:
+                #     active = bool(np.mean(values["data3"]) > 8)
+                #     values["active"] = active
 
                 values[dk] = processors[name](np.array(v, dtype=float))
 

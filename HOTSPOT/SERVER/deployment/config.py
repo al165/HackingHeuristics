@@ -80,8 +80,8 @@ OUTPUT_VECTOR = [
     "freq",
     "durn",
     "idly",
-    "temp1",
-    "temp2",
+    # "temp1",
+    # "temp2",
     "airon",
     "airtime",
 ]
@@ -91,8 +91,8 @@ OUTPUT_VECTOR_RANGES = {
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],
-    "temp1": [-2, 2],
-    "temp2": [-2, 2],
+    "temp1": [-1, 1],
+    "temp2": [-1, 1],
     "airon": [0, 1.0],
     "airtime": [1, 5],
 }

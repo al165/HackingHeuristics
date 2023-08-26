@@ -2,8 +2,20 @@ import socket
 import struct
 import sys
 import time
+import json
 
-message = b'{"C4:4F:33:65:DA:79": {"data": 123}}'
+
+data = {
+    "0": {
+        "type": "sensor",
+        "touchCount": 1,
+    }
+}
+
+message = bytes(json.dumps(data), "ascii")
+print(message)
+
+# message = b'{"C4:4F:33:65:DA:79": {"data": 123}}'
 multicast_group = (
     '224.3.29.71',
     10000
@@ -38,7 +50,6 @@ try:
         if time.time() > last_lighthouse + 30:
             sent = sock.sendto(b"{'lighthouse': {'port': 8000}}", multicast_group)
             last_lighthouse = time.time()
-
         try:
             data, server = sock.recvfrom(1024)
         except socket.timeout:

@@ -24,8 +24,19 @@
 
 #include <Wire.h>
 #include "NeuroStimDuino.h"
+#include "NoiselessTouchESP32.h"
 
 #define VALVE_PIN 15
+
+#define TOUCH_HISTORY_LEN 6 // history length 
+#define TOUCH_HYSTERESIS 8 // this is the sensitivity
+const int TOUCH_PIN[] = {T9, T8};
+
+NoiselessTouchESP32 touchsensor1(TOUCH_PIN[0], TOUCH_HISTORY_LEN, TOUCH_HYSTERESIS);
+NoiselessTouchESP32 touchsensor2(TOUCH_PIN[1], TOUCH_HISTORY_LEN, TOUCH_HYSTERESIS);
+NoiselessTouchESP32 touchsensor[2] = {touchsensor1,touchsensor2}; 
+
+int touchCount = 0;
 
 WiFiManager wm;
 AsyncUDP udp;
@@ -35,10 +46,6 @@ const int UDP_PORT = 10000;
 
 String mac;
 String station;
-
-// Stimulator loop that continuously updates the AMP value of
-// the Neurostimduino
-TaskHandle_t Loop2;
 
 int rampStates = 0;
 int rampVals = 0;
@@ -71,9 +78,7 @@ void blink(){
   blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
-
 void parsePacket(AsyncUDPPacket packet){
-  blink();
   String data(reinterpret_cast<char *>(packet.data()));
 
   Serial.println("--------");
@@ -87,6 +92,7 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
+  blink();
   JsonObject obj = doc.as<JsonObject>();
 
   if(obj.containsKey(mac)){
@@ -189,6 +195,22 @@ bool setValveAvaliable(void*){
   return true;
 }
 
+bool updateTouch(void*){
+  int count = 0;
+  for (int i=0; i<2; i++){
+    if(touchsensor[i].touching()){
+      count++;
+    }
+  }
+
+  if(count != touchCount){
+    touchCount = count;
+    udp.printf("{\"0\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
+    Serial.printf("{\"0\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
+  }
+  return true;
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -196,6 +218,7 @@ void setup() {
 
   pinMode(VALVE_PIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   NSWire.begin();
 
@@ -228,6 +251,7 @@ void setup() {
 
   timer.every(10000, ping);
   timer.every(RAMP_TIME, updateRamp);
+  timer.every(100, updateTouch);
   ping(0);
 
   udp.print("{\"server\":{\"type\": \"whoami\"}}");

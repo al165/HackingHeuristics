@@ -44,6 +44,10 @@ const int MAX_ANALOG_INPUT = 1023;
 // proximity indicator pin(s)
 #define IND1 14
 
+// HEAT_DIRECTION indicates which way the pins have to be powered to make the
+// temp things warm - set to either 0 or 1.
+#define HEAT_DIRECTION 0
+
 #include <WiFiClient.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
@@ -168,6 +172,7 @@ bool readPins(void *){
 }
 
 bool turnTempsOff(void *){
+  Serial.println("turnTempsOff");
   digitalWrite(AIN2, LOW);
   digitalWrite(AIN1, LOW);
   digitalWrite(BIN2, LOW);
@@ -179,11 +184,9 @@ bool turnTempsOff(void *){
 
 void parsePacket(AsyncUDPPacket packet){
   String data(reinterpret_cast<char *>(packet.data()));
-
-  // Serial.println("--------");
-  // Serial.println(data);
-
   blink();
+
+  Serial.println(data);
 
   DynamicJsonDocument doc(1024);
   DeserializationError error = deserializeJson(doc, data);
@@ -228,6 +231,28 @@ void parsePacket(AsyncUDPPacket packet){
     }
   }
 
+  if(parameters.containsKey("touchCount")){
+    int val = parameters["touchCount"].as<int>();
+    if(val > 0){
+      Serial.println("turning on temps");
+
+      if(HEAT_DIRECTION){
+        digitalWrite(AIN2, LOW);
+        digitalWrite(AIN1, HIGH);
+        digitalWrite(BIN2, LOW);
+        digitalWrite(BIN1, HIGH);
+      } else {
+        digitalWrite(AIN2, HIGH);
+        digitalWrite(AIN1, LOW);
+        digitalWrite(BIN2, HIGH);
+        digitalWrite(BIN1, LOW);
+      }
+      timer.in(TEMP_ON, turnTempsOff);
+    } else {
+      turnTempsOff(0);
+    }
+  }
+  /*
   // Temperatures
   bool tempChange = false;
   if(parameters.containsKey("temp1") && !ignoreTemp){
@@ -268,6 +293,7 @@ void parsePacket(AsyncUDPPacket packet){
     ignoreTemp = true;
     timer.in(TEMP_ON, turnTempsOff);
   }
+  */
 
   return;
 }
