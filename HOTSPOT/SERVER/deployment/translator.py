@@ -193,7 +193,7 @@ class Translator(multiprocessing.Process):
                 continue
 
             if not agent.active:
-                print(f"agent {agent.id} inactive, skipping output")
+                # print(f"agent {agent.id} inactive, skipping output")
                 continue
 
             parameters = dict()
@@ -282,8 +282,12 @@ class Translator(multiprocessing.Process):
                 self.updated = True
 
             elif msg_type == "whoami":
+                if host not in self.agents:
+                    print("'whoami' from unregisterwed host ", host)
+                    continue
                 mac = self.agents[host].mac
                 id_ = self.agents[host].id
+                station = self.agents[host].station
                 data = dict()
                 data[mac] = {"type": "whoami", "station": station, "id": id_,}
                 self.broadcast(data)

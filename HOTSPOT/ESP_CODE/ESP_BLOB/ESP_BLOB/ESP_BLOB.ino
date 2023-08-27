@@ -19,6 +19,7 @@
 #endif
 
 #include <WiFiManager.h>
+#define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 
@@ -75,7 +76,7 @@ bool ping(void *){
 void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
+  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
 void parsePacket(AsyncUDPPacket packet){
@@ -84,7 +85,7 @@ void parsePacket(AsyncUDPPacket packet){
   Serial.println("--------");
   Serial.println(data);
 
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<1024> doc;
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -93,10 +94,10 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   blink();
-  JsonObject obj = doc.as<JsonObject>();
+  // JsonObject obj = doc.as<JsonObject>();
 
-  if(obj.containsKey(mac)){
-    JsonObject details = obj[mac];
+  if(doc.containsKey(mac)){
+    JsonObject details = doc[mac];
     if(details.containsKey("station")){
       // sprintf(station, "%d", details["station"]);
       station = details["station"].as<String>();
@@ -105,11 +106,11 @@ void parsePacket(AsyncUDPPacket packet){
     }
   }
 
-  if(!obj.containsKey(station)){
+  if(!doc.containsKey(station)){
     return;
   }
 
-  JsonObject parameters = obj[station];
+  JsonObject parameters = doc[station];
   String output;
   serializeJson(parameters, output);
   Serial.println(output);

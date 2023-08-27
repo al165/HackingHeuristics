@@ -104,6 +104,17 @@ def makeHTTPServer(msg_q):
             self.send_header('Content-type', 'text/html')
             self.end_headers()
 
+        def do_GET(self):
+            self.send_response(200, 'OK')
+            self.send_header('Content-type', 'html')
+            self.end_headers()
+            self.wfile.write(
+                bytes(
+                    "<html> <head><title> HOTSPOT Server </title> </head> <body>Online</body>", 
+                    'ascii'
+                )
+            )
+
         def do_POST(self):
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length)
@@ -113,7 +124,9 @@ def makeHTTPServer(msg_q):
             except:
                 print("error decoding data")
                 self._set_response()
+                return
 
+            # print(json_data)
             addr = self.client_address
             values = processBuffer(json_data)
             if "server" not in values:
@@ -167,7 +180,6 @@ def multicast_listener(mcast_socket, stop_event, mailboxes):
             for recipiant, queue in mailboxes.items():
                 if recipiant in json_data:
                     queue.put((addr, json_data[recipiant]))
-
 
 
 def getInterfaceIP(interface="wlan0"):
@@ -275,7 +287,7 @@ def main():
     print("="*50)
     print()
 
-    rd_server.start()
+    # rd_server.start()
     translator.start()
     scheduler.start()
     http_thread.start()

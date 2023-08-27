@@ -11,6 +11,7 @@
 #endif
 
 #include <WiFiManager.h>
+#define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 #include <Wire.h>
@@ -66,7 +67,6 @@ bool setValveAvaliable(void* station){
 }
 
 void parsePacket(AsyncUDPPacket packet){
-  blink();
   String data(reinterpret_cast<char *>(packet.data()));
 
   // Serial.println("--------");
@@ -80,13 +80,19 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
+  blink();
   JsonObject obj = doc.as<JsonObject>();
 
-  // JsonObject parameters = obj[mac];
-  // String output;
-  // serializeJson(parameters, output);
-  // Serial.println("recieved parameters:");
-  // Serial.println(output);
+  if(obj.containsKey("rd_samples")){
+    JsonObject parameters = obj["rd_samples"];
+    for(station = 0; station < 6; station++){
+      String name = (String) station;
+
+
+
+    }
+
+  }
 
   int station;
   for(station = 0; station < 6; station++){
@@ -97,9 +103,6 @@ void parsePacket(AsyncUDPPacket packet){
     }
 
     JsonObject parameters = obj[name];
-    // String output;
-    // serializeJson(parameters, output);
-    // Serial.println("Station " + name + " " + output);
 
     if(parameters.containsKey("airtime")){
       float airtime = parameters["airtime"];
@@ -117,10 +120,6 @@ void parsePacket(AsyncUDPPacket packet){
       display.setTextColor(WHITE);
       display.setCursor(40, 20);
 
-      // if(val < 0.5 && valveState[station] == 2){
-      //   display.print(station);
-      //   display.println(": off");
-      // } else 
       
       if(val >= 0.5 && valveState[station] == 0){
         display.print(name);

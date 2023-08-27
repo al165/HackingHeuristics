@@ -50,6 +50,7 @@ const int MAX_ANALOG_INPUT = 1023;
 
 #include <WiFiClient.h>
 #include <WiFiManager.h>
+#define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 
@@ -59,14 +60,14 @@ const int MAX_ANALOG_INPUT = 1023;
 #define SCREEN_WIDTH 128 
 #define SCREEN_HEIGHT 64 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-String screenMessage;
+char screenMessage[32];
 
 WiFiManager wm;
 AsyncUDP udp;
 
 WiFiClient client;
 IPAddress host(192, 168, 2, 9);
-unsigned int port = 8080;
+int port = 8080;
 
 char SERVER_URL[80];
 bool connected = false;
@@ -74,46 +75,39 @@ bool connected = false;
 IPAddress MCAST_GRP(224,3,29,71);
 const int UDP_PORT = 10000;
 
-String mac;
-String station;
+char mac[18];
+char station[2] = {0, 0};
+// station = "XX";
 
-const int DATA_LENGTH = 128;
-const int SAMPLE_RATE = 512;
-const int json_values_capacity = JSON_OBJECT_SIZE(6) + 4 * JSON_OBJECT_SIZE(DATA_LENGTH);
-const int json_capacity = json_values_capacity  + JSON_OBJECT_SIZE(1);
-StaticJsonDocument<json_capacity> doc;
+#define DATA_LENGTH 128
+#define SAMPLE_RATE 512
 
-int data_ptr = 0;
-JsonArray data0;
-JsonArray data1;
-JsonArray data2;
-JsonArray data3;
+const int json_capacity = JSON_OBJECT_SIZE(6) + 4 * JSON_OBJECT_SIZE(DATA_LENGTH)  + JSON_OBJECT_SIZE(1);
 
-// sensor reads
-int read0 = 0;
-int read1 = 0;
-int read2 = 0;
-int read3 = 0;
+int reads[4] = {0, 0, 0, 0};
 
-// Active status and timers
-bool active = true;
-int avg_active = 0;
-bool sleep_post = false;
+struct SensorData {
+  bool active;
+  int data0[DATA_LENGTH];
+  int data1[DATA_LENGTH];
+  int data2[DATA_LENGTH];
+  int data3[DATA_LENGTH];
+};
+
+SensorData sensorData;
 
 // Temperature "on" time
 const long TEMP_ON = 5000;
-bool ignoreTemp = false;
 
 // timer to simplify scheduling events
 Timer<6> timer;
-
-auto blink_timer = timer_create_default();
+Timer<> blink_timer;
 
 
 bool ping(void *){
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac.c_str());
+  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
   blink();
-  // Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac.c_str());
+  // Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac);
   return true;
 }
 
@@ -123,27 +117,30 @@ void blink(){
   blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
-bool readPins(void *){
-  read0 = analogRead(SENSOR0);
-  read1 = analogRead(SENSOR1);
-  read2 = analogRead(SENSOR2);
-  read3 = analogRead(SENSOR3);
 
-  data0[data_ptr] = read0;
-  data1[data_ptr] = read1;
-  data2[data_ptr] = read2;
-  data3[data_ptr] = read3;
+bool readPins(void *){
+
+  static int data_ptr = 0;
+  static int avg_active = 0;
+  static bool active = false;
+  static bool sleep_post = false;
+
+  reads[0] = analogRead(SENSOR0);
+  reads[1] = analogRead(SENSOR1);
+  reads[2] = analogRead(SENSOR2);
+  reads[3] = analogRead(SENSOR3);
+
+  sensorData.data0[data_ptr] = reads[0];
+  sensorData.data1[data_ptr] = reads[1];
+  sensorData.data2[data_ptr] = reads[2];
+  sensorData.data3[data_ptr] = reads[3];
 
   data_ptr++;
-  avg_active += read3;
+  avg_active += reads[3];
 
   if(data_ptr >= DATA_LENGTH) {
     active = (float) avg_active / DATA_LENGTH > 8.0;
 
-    char output[4096];
-    serializeJson(doc, output);
-    // Serial.println(output);
-    
     data_ptr = 0;
     avg_active = 0;
 
@@ -152,6 +149,27 @@ bool readPins(void *){
       return true;
     }
 
+    DynamicJsonDocument doc(json_capacity);
+    JsonObject server = doc.createNestedObject("server");
+    JsonArray data0 = server.createNestedArray("data0");
+    JsonArray data1 = server.createNestedArray("data1");
+    JsonArray data2 = server.createNestedArray("data2");
+    JsonArray data3 = server.createNestedArray("data3");
+    for(int i=0; i< DATA_LENGTH; i++){
+      data0.add(sensorData.data0[i]);
+      data1.add(sensorData.data1[i]);
+      data2.add(sensorData.data2[i]);
+      data3.add(sensorData.data3[i]);
+    }
+    server["type"] = "sensor";
+    server["active"] = active;
+    size_t len = measureJson(doc);
+    if(doc.overflowed()){
+      Serial.println("doc overflowed!");
+    }
+    char output[3072];
+    serializeJson(doc, output);
+
     HTTPClient http;
     http.begin(client, SERVER_URL);
     http.addHeader("Content-Type", "application/json");
@@ -159,10 +177,9 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
-      // Serial.print(httpResponseCode);
-      // Serial.println("  disconnect");
     }
     http.end();
+
     blink();
 
     sleep_post = !active;
@@ -172,21 +189,17 @@ bool readPins(void *){
 }
 
 bool turnTempsOff(void *){
-  Serial.println("turnTempsOff");
   digitalWrite(AIN2, LOW);
   digitalWrite(AIN1, LOW);
   digitalWrite(BIN2, LOW);
   digitalWrite(BIN1, LOW);
 
-  ignoreTemp = false;
   return true;
 }
 
 void parsePacket(AsyncUDPPacket packet){
-  String data(reinterpret_cast<char *>(packet.data()));
+  auto data = packet.data();
   blink();
-
-  Serial.println(data);
 
   DynamicJsonDocument doc(1024);
   DeserializationError error = deserializeJson(doc, data);
@@ -196,31 +209,26 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  JsonObject obj = doc.as<JsonObject>();
-
-  if(obj.containsKey("all")){
-    if(obj["all"]["type"] == "lighthouse"){
+  if(doc.containsKey("all")){
+    if(doc["all"]["type"] == "lighthouse"){
       host = packet.remoteIP();
-      port = obj["all"]["port"];
+      port = doc["all"]["port"];
       connect();
     }
   }
 
-  if(obj.containsKey(mac)){
-    JsonObject details = obj[mac];
+  if(doc.containsKey(mac)){
+    JsonObject details = doc[mac];
     if(details.containsKey("station")){
-      station = details["station"].as<String>();
-      // sprintf(screenMessage, "* station %s *", station.c_str());
-      screenMessage = "* station: " + station + " *";
-      timer.in(2000, [](void*) -> bool {screenMessage = ""; return true;});
+      itoa(details["station"], station, 10);
     }
   }
 
-  if(!obj.containsKey(station)){
+  if(!doc.containsKey(station)){
     return;
   }
 
-  JsonObject parameters = obj[station];
+  JsonObject parameters = doc[station];
 
   // LED Indicator
   if(parameters.containsKey("highlight")){
@@ -252,48 +260,6 @@ void parsePacket(AsyncUDPPacket packet){
       turnTempsOff(0);
     }
   }
-  /*
-  // Temperatures
-  bool tempChange = false;
-  if(parameters.containsKey("temp1") && !ignoreTemp){
-    float temp = parameters["temp1"];
-
-    if(temp > 0.2){
-      digitalWrite(AIN2, LOW);
-      digitalWrite(AIN1, HIGH);
-    } else if(temp < 0.2){
-      digitalWrite(AIN1, LOW);
-      digitalWrite(AIN2, HIGH);
-    } else {
-      digitalWrite(AIN1, LOW);
-      digitalWrite(AIN2, LOW);
-    }
-
-    tempChange = true;
-  }
-
-  if(parameters.containsKey("temp2") && !ignoreTemp){
-    float temp = parameters["temp2"];
-
-    if(temp > 0.2){
-      digitalWrite(BIN2, LOW);
-      digitalWrite(BIN1, HIGH);
-    } else if(temp < 0.2){
-      digitalWrite(BIN1, LOW);
-      digitalWrite(BIN2, HIGH);
-    } else {
-      digitalWrite(BIN1, LOW);
-      digitalWrite(BIN2, LOW);
-    }
-
-    tempChange = true;
-  }
-
-  if(tempChange){
-    ignoreTemp = true;
-    timer.in(TEMP_ON, turnTempsOff);
-  }
-  */
 
   return;
 }
@@ -343,36 +309,30 @@ void setup() {
     });
   }
 
-  mac = getMac();
+  getMac();
 
   Serial.println("**********");
   Serial.print(" MAC: ");
   Serial.println(mac);
   Serial.println("**********");
 
-  // sprintf(screenMessage, "* MAC %s *", mac.c_str());
-  screenMessage = "* MAC " + mac + " *";
-  timer.in(4000, [](void*) -> bool {screenMessage = ""; return true;});
+  // snprintf(screenMessage, sizeof(screenMessage), "* MAC %s *", mac);
+  // screenMessage = "* MAC " + mac + " *";
+  // timer.in(4000, [](void*) -> bool {screenMessage[0] = 0; return true;});
 
   timer.every(10000, ping);
   timer.every(1000/SAMPLE_RATE, readPins);
   timer.every(100, updateScreen);
 
-
-  JsonObject server = doc.createNestedObject("server");
-  server["type"] = "sensor";
-  server["active"] = true;
-
-  data0 = server.createNestedArray("data0");
-  data1 = server.createNestedArray("data1");
-  data2 = server.createNestedArray("data2");
-  data3 = server.createNestedArray("data3");
-
   ping(0);
   connect();
+
+  Serial.print("json_capacity ");
+  Serial.println(json_capacity);
 }
 
 void loop() {
+  // Serial.print("loop");
   timer.tick();
   blink_timer.tick();
 }
@@ -382,10 +342,10 @@ bool updateScreen(void*) {
   
   // int maxRadius = min(display.width(), display.height());
  
-  // int r0 = map(read0, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r1 = map(read1, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r2 = map(read2, 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r3 = map(read3, 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r0 = map(reads[0], 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r1 = map(reads[1], 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r2 = map(reads[2], 0, MAX_ANALOG_INPUT, 0, maxRadius);
+  // int r3 = map(reads[3], 0, MAX_ANALOG_INPUT, 0, maxRadius);
  
   // int x0 = 10;
   // int y0 = display.height() / 2;
@@ -402,14 +362,10 @@ bool updateScreen(void*) {
   // show message
   display.setTextSize(1);
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(64, 10);
-  display.println(read0);
-  display.setCursor(64, 20);
-  display.println(read1);
-  display.setCursor(64, 30);
-  display.println(read2);
-  display.setCursor(64, 40);
-  display.println(read3);
+  for(int i = 0; i < 4; i++){
+    display.setCursor(64, 10+i*10);
+    display.println(reads[i]);
+  }
   display.println(screenMessage);
 
   display.display(); 
@@ -418,22 +374,28 @@ bool updateScreen(void*) {
 }
 
 
-String getMac() {
+void getMac() {
   byte baseMac[6];
   WiFi.macAddress(baseMac);
-  char baseMacChr[18] = {0};
-  sprintf(
-    baseMacChr, 
+  snprintf(
+    mac, 
+    sizeof(mac),
     "%02X:%02X:%02X:%02X:%02X:%02X", 
     baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]
   );
-  return String(baseMacChr);
 }
 
 void connect(){
-  sprintf(SERVER_URL, "http://%s:%u/", host.toString().c_str(), port);
-  // Serial.print("connect: ");
-  // Serial.println(SERVER_URL);
+  snprintf(
+    SERVER_URL,
+    sizeof(SERVER_URL),
+    "http://%u.%u.%u.%u:%u/", 
+    host[0], 
+    host[1], 
+    host[2], 
+    host[3], 
+    port
+  );
   connected = true;
   udp.print("{\"server\":{\"type\": \"whoami\"}}");
 }

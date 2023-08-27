@@ -1,7 +1,7 @@
+import json
 import socket
 import threading
 from queue import Empty
-
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -133,7 +133,7 @@ class RDServer(threading.Thread):
         self.B[N1-r:N1+r, N2-r:N2+r] = 0.25
 
     def addSamplePoint(self, name, pos):
-        self.sample_points[name] = pos
+        self.sample_points[name] = np.array(pos)
 
     def removeSamplePoint(self, name):
         del self.sample_points[name]
@@ -145,18 +145,22 @@ class RDServer(threading.Thread):
         return data
 
     def getSamplePoint(self, pos, which='A'):
-        idxs = np.round(pos, np.interp(np.linspace(-1, 1, self.N), np.arange(N))).astype(int)
+        i = np.round(np.interp(pos[0], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+        j = np.round(np.interp(pos[1], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+
         if which == 'A':
-            return self.A[idxs]
+            return self.A[i,j]
         else:
-            return self.B[idxs]
+            return self.B[i,j]
 
     def broadcast(self, data):
-        if self.mcast_socket is None:
-            return
+        # if self.mcast_socket is None:
+        #     return
 
-        json_data = json.dumps(data)
-        sent = self.mcast_socket.sendto(bytes(json_data, 'ascii'), (MCAST_GRP, MCAST_PORT))
+        msg = dict(rd_samples=data)
+        json_data = json.dumps(msg)
+        print(json_data)
+        # sent = self.mcast_socket.sendto(bytes(msg, 'ascii'), (MCAST_GRP, MCAST_PORT))
 
     def renderFrame(self, focus='A', save=None):       
         im = self.ax.imshow(self.A, animated=True,vmin=0,cmap='Greys')
@@ -177,8 +181,11 @@ class RDServer(threading.Thread):
             
             if self.save:
                 self.renderFrame('B', save=self.save)
-                
+
             self.check_messages()
+
+            sample_data = self.getSamples()
+            self.broadcast(sample_data)
 
             if self.stop_event.is_set():
                 break
@@ -195,7 +202,7 @@ class RDServer(threading.Thread):
 
             msg_type = msg.get("type", "unknown")
             if msg_type == "update_point":
-                self.addSamplePoint(msg["name"], np.array(msg["point"]))
+                self.addSamplePoint(msg["name"], msg["point"])
 
             elif msg_type == "remove_point":
                 self.removeSamplePoint(msg["name"])
@@ -209,6 +216,9 @@ def main():
     stop_event = threading.Event()
 
     rd_server = RDServer(stop_event=stop_event)
+
+    rd_server.addSamplePoint("0", [0, 0])
+    rd_server.addSamplePoint("1", [-0.6, 0.4])
 
     def signal_handler(signum, frame):
         print("\nClosing server")
