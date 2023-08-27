@@ -157,7 +157,19 @@ def makeHTTPServer(msg_q):
 
 def lighthouse(mcast_socket):
     sent = mcast_socket.sendto(
-        bytes("{\"all\": {\"type\": \"lighthouse\", \"port\": " + str(PORT) + "}}", 'ascii'), 
+        bytes(
+            "{\"all\": {\"type\": \"lighthouse\", \"port\": " + str(PORT) + "}}", 
+            'ascii'
+        ), 
+        (MCAST_GRP, MCAST_PORT)
+    )
+
+def rd_sample(mcast_socket):
+    sent = mcast_socket.sendto(
+        bytes(
+            "{\"rd\": {\"type\": \"get_samples\"}}", 
+            'ascii'
+        ), 
         (MCAST_GRP, MCAST_PORT)
     )
         
@@ -246,14 +258,15 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    def add_message(msg):
-        server_q.put(((HOST, PORT), msg))
+    def add_message(msg_q, msg):
+        msg_q.put(((HOST, PORT), msg))
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(lighthouse, 'interval', args=(mcast_socket,), seconds=10)
-    scheduler.add_job(add_message, 'interval', args=({"type": "checkpoint"},), seconds=CHECKPOINT_INTERVAL)
-    scheduler.add_job(add_message, 'interval', args=({"type": "features"},), seconds=UPDATE_TIME)
-    scheduler.add_job(add_message, 'interval', args=({"type": "output"},), seconds=UPDATE_TIME)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "checkpoint"},), seconds=CHECKPOINT_INTERVAL)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "features"},), seconds=UPDATE_TIME)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "output"},), seconds=UPDATE_TIME)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "agent_positions"},), seconds=2)
 
     translator = Translator(
         server_q,
@@ -275,6 +288,8 @@ def main():
         msg_q=rd_q,
         save="rd.png",
     )
+    scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "get_samples"},), seconds=0.5)
+    scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "add_random"},), seconds=4)
 
     handler_class = makeHTTPServer(server_q)
     httpd = HTTPServer((HOST, PORT), handler_class)
@@ -287,7 +302,7 @@ def main():
     print("="*50)
     print()
 
-    # rd_server.start()
+    rd_server.start()
     translator.start()
     scheduler.start()
     http_thread.start()

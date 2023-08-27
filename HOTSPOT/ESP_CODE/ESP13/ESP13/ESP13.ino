@@ -8,6 +8,8 @@
 // ------- ESP8266 constants -------------------
 #include <ESPAsyncUDP.h>
 #define LED_BUILTIN 16
+#define LOW 1
+#define HIGH 0
 #endif
 
 #include <WiFiManager.h>
@@ -23,9 +25,10 @@ AsyncUDP udp;
 
 IPAddress MCAST_GRP(224,3,29,71);
 const int UDP_PORT = 10000;
-String mac;
 
-const int MAX_AIR_TIME = 10;
+char mac[18];
+
+#define MAX_AIR_TIME 10
 const int VALVE_PINS[] = {26, 16, 17, 18, 19, 23};
 // 0: off and ready, 1: off and cooling down, 2: on
 bool valveState[] = {0, 0, 0, 0, 0, 0};
@@ -41,23 +44,22 @@ Timer<12> timer;
 Timer<> blink_timer;
 
 bool ping(void *){
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac.c_str());
   blink();
+  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
   return true;
 }
 
 void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
+  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
 bool turnValveOff(void* station){
   digitalWrite(VALVE_PINS[(int)station], LOW);
   valveState[(int)station] = 1;
-  Serial.println("turnValveOff");
-
-  timer.in((int) valveTimes[(int) station], setValveAvaliable, station);
+  // timer.in((int) valveTimes[(int) station], setValveAvaliable, station);
+  // setValveAvaliable(station);
   return true;
 }
 
@@ -67,12 +69,10 @@ bool setValveAvaliable(void* station){
 }
 
 void parsePacket(AsyncUDPPacket packet){
-  String data(reinterpret_cast<char *>(packet.data()));
+  auto data = packet.data();
+  blink();
 
-  // Serial.println("--------");
-  // Serial.println(data);
-
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -80,63 +80,32 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  blink();
-  JsonObject obj = doc.as<JsonObject>();
+  if(doc.containsKey("rd_samples")){
+    JsonObject parameters = doc["rd_samples"];
+    delay(100);
+    for(int station = 0; station < 6; station++){
+      char name[2] = {0};
+      itoa(station, name, 10);
 
-  if(obj.containsKey("rd_samples")){
-    JsonObject parameters = obj["rd_samples"];
-    for(station = 0; station < 6; station++){
-      String name = (String) station;
-
-
-
-    }
-
-  }
-
-  int station;
-  for(station = 0; station < 6; station++){
-    String name = (String) station;
-
-    if(!obj.containsKey(name)){
-      continue;
-    }
-
-    JsonObject parameters = obj[name];
-
-    if(parameters.containsKey("airtime")){
-      float airtime = parameters["airtime"];
-      valveTimes[station] = (int) (airtime * 1000);
-    }
-
-    if(parameters.containsKey("airon")){
-      float val = parameters["airon"];
-      if(val > MAX_AIR_TIME){
-        val = (float) MAX_AIR_TIME;
+      if(!parameters.containsKey(name)){
+        continue;
       }
 
-      display.clearDisplay();
-      display.setTextSize(3);
-      display.setTextColor(WHITE);
-      display.setCursor(40, 20);
+      float val = parameters[name];
 
-      
-      if(val >= 0.5 && valveState[station] == 0){
-        display.print(name);
-        display.println(": on");
+      if(val > 0.5 && valveState[station] == 0){
+        Serial.printf("valve %u activated\n", station);
         digitalWrite(VALVE_PINS[station], HIGH);
-
-        Serial.println("valve " + name + " :on");
-
         valveState[station] = 2;
-        timer.in((int) valveTimes[station], turnValveOff, (void *)station);
+        timer.in(500, turnValveOff, (void *)station);
+      } else if(val < 0.5 && valveState[station] == 1){
+        setValveAvaliable((void*) station);
       }
 
-      display.display();
     }
+
   }
 
-  return;
 }
 
 
@@ -145,6 +114,7 @@ void setup() {
   Serial.println();
 
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   for(int count=0;count<6;count++) {
     pinMode(VALVE_PINS[count], OUTPUT);
@@ -184,8 +154,9 @@ void setup() {
   display.println(" ..START UP..");
   display.display(); 
 
-  mac = getMac();
-  Serial.println("** MAC: " + mac);
+  getMac();
+  Serial.print("** MAC: ");
+  Serial.println(mac);
   
   timer.every(10000, ping);
   ping(0);
@@ -196,14 +167,13 @@ void loop() {
   blink_timer.tick();
 }
 
-String getMac(){
+void getMac() {
   byte baseMac[6];
   WiFi.macAddress(baseMac);
-  char baseMacChr[18] = {0};
-  sprintf(
-    baseMacChr, 
+  snprintf(
+    mac, 
+    sizeof(mac),
     "%02X:%02X:%02X:%02X:%02X:%02X", 
     baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]
   );
-  return String(baseMacChr);
 }

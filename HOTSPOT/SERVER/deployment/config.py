@@ -22,10 +22,10 @@ STATIONS = {
     "94:E6:86:05:13:4C": (3, 3, ESP.HEADSET),   # HEADSET 3
     "94:E6:86:03:A3:C4": (3, 9, ESP.BLOB),      # BLOB 3
     "C4:4F:33:65:DA:79": (4, 4, ESP.HEADSET),   # HEADSET 4
-    "E8:DB:84:C5:C2:B5": (4, 10, ESP.BLOB),     # BLOB 4
+    "E9:DB:84:C5:C2:B5": (4, 10, ESP.BLOB),     # BLOB 4
     "C4:4F:33:65:DA:80": (5, 5, ESP.HEADSET),   # HEADSET 5
-    "E8:DB:84:C5:C2:B6": (5, 11, ESP.BLOB),     # BLOB 5
-    "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
+    "E9:DB:84:C5:C2:B6": (5, 11, ESP.BLOB),     # BLOB 5
+    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13
 }
 
 

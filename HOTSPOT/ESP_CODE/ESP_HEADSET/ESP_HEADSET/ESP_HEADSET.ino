@@ -77,7 +77,6 @@ const int UDP_PORT = 10000;
 
 char mac[18];
 char station[2] = {0, 0};
-// station = "XX";
 
 #define DATA_LENGTH 128
 #define SAMPLE_RATE 512
@@ -117,9 +116,22 @@ void blink(){
   blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
 }
 
+bool pulse(void *){
+  static int fade_amt = -1;
+  static int brightness = 128;
+
+  ledcWrite(LED_BUILTIN, brightness);
+
+  if(brightness <= 0 || brightness >= 255){
+    fade_amt = -fade_amt;
+  }
+
+  brightness += fade_amt;
+  return true;
+}
+
 
 bool readPins(void *){
-
   static int data_ptr = 0;
   static int avg_active = 0;
   static bool active = false;
@@ -286,6 +298,9 @@ void setup() {
     for(;;);
   }
   display.clearDisplay();
+
+  ledcSetup(LED_BUILTIN, 5000, 8);
+  ledcAttachPin(LED_BUILTIN, 0);
 
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);

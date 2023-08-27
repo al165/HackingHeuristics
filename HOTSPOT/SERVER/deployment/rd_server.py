@@ -6,6 +6,8 @@ from queue import Empty
 import numpy as np
 import matplotlib.pyplot as plt
 
+from config import MCAST_GRP, MCAST_PORT
+
 plt.switch_backend('agg')
 
 def interp(a, b, x):
@@ -116,12 +118,16 @@ class RDServer(threading.Thread):
         self.A += diff_A * self.delta_t
         self.B += diff_B * self.delta_t
 
-    def setFK(f=None, k=None):
+    def setFK(self, f=None, k=None):
         if f is not None:
             self.f = f
 
         if k is not None:
             self.k = k
+
+    def setXY(self, x, y):
+        k, f = xy_to_kf(x, y)
+        self.setFK(f, k)
 
     def addRandom(self):
         r = 5
@@ -144,9 +150,13 @@ class RDServer(threading.Thread):
             data[i] = self.getSamplePoint(sp, which)
         return data
 
-    def getSamplePoint(self, pos, which='A'):
+    def posToIndex(self, pos):
         i = np.round(np.interp(pos[0], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
         j = np.round(np.interp(pos[1], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+        return i, j
+
+    def getSamplePoint(self, pos, which='A'):
+        i, j = self.posToIndex(pos)
 
         if which == 'A':
             return self.A[i,j]
@@ -154,13 +164,12 @@ class RDServer(threading.Thread):
             return self.B[i,j]
 
     def broadcast(self, data):
-        # if self.mcast_socket is None:
-        #     return
+        if self.mcast_socket is None:
+            return
 
         msg = dict(rd_samples=data)
         json_data = json.dumps(msg)
-        print(json_data)
-        # sent = self.mcast_socket.sendto(bytes(msg, 'ascii'), (MCAST_GRP, MCAST_PORT))
+        sent = self.mcast_socket.sendto(bytes(json_data, 'ascii'), (MCAST_GRP, MCAST_PORT))
 
     def renderFrame(self, focus='A', save=None):       
         im = self.ax.imshow(self.A, animated=True,vmin=0,cmap='Greys')
@@ -168,6 +177,10 @@ class RDServer(threading.Thread):
             im.set_array(self.B)
         self.ax.axis('off')
         self.ax.set_title(focus)
+
+        for name, pos in self.sample_points.items():
+            i, j = self.posToIndex(pos)
+            self.ax.text(i, j, name, c='red')
 
         if save is not None:
             plt.savefig(save)
@@ -184,9 +197,6 @@ class RDServer(threading.Thread):
 
             self.check_messages()
 
-            sample_data = self.getSamples()
-            self.broadcast(sample_data)
-
             if self.stop_event.is_set():
                 break
 
@@ -201,14 +211,30 @@ class RDServer(threading.Thread):
                 break
 
             msg_type = msg.get("type", "unknown")
-            if msg_type == "update_point":
-                self.addSamplePoint(msg["name"], msg["point"])
+
+            if msg_type == "update_points":
+                for name, pos in msg.items():
+                    if name == "type":
+                        continue
+                    self.addSamplePoint(name, pos)
 
             elif msg_type == "remove_point":
                 self.removeSamplePoint(msg["name"])
 
             elif msg_type == "fk":
                 self.setFK(msg["f"], msg["k"])
+
+            elif msg_type == "xy":
+                self.setXY(msg["x"], msg["y"])
+
+            elif msg_type == "get_samples":
+                if len(self.sample_points) == 0:
+                    return
+                data = self.getSamples()
+                self.broadcast(data)
+
+            elif msg_type == "add_random":
+                self.addRandom()
 
         
 def main():

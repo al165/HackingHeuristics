@@ -301,6 +301,9 @@ class Translator(multiprocessing.Process):
             elif msg_type == "output":
                 self.output()
 
+            elif msg_type == "agent_positions":
+                self.getAgentPositions()
+
             else:
                 print(f"Unkown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
 
@@ -418,6 +421,16 @@ class Translator(multiprocessing.Process):
                 if dist < threshold:
                     active_agents[i].highlight = True
                     active_agents[j].highlight = True
+
+    def getAgentPositions(self):
+        data = dict()
+        for host, agent in self.getActiveAgents(filter_type=(ESP.BLOB, ESP.ESP13)).items():
+            data[agent.id] = list(agent.map[-1].astype(float))
+        data["type"] = "update_points"
+        print("getAgentPositions", data)
+        msg = dict(rd=data)
+        self.broadcast(msg)
+
 
     def updatePlotQueue(self):
         if self.updated and self.plot_q is not None:

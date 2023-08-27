@@ -37,29 +37,26 @@ NoiselessTouchESP32 touchsensor1(TOUCH_PIN[0], TOUCH_HISTORY_LEN, TOUCH_HYSTERES
 NoiselessTouchESP32 touchsensor2(TOUCH_PIN[1], TOUCH_HISTORY_LEN, TOUCH_HYSTERESIS);
 NoiselessTouchESP32 touchsensor[2] = {touchsensor1,touchsensor2}; 
 
-int touchCount = 0;
-
 WiFiManager wm;
 AsyncUDP udp;
 
 IPAddress MCAST_GRP(224,3,29,71);
 const int UDP_PORT = 10000;
 
-String mac;
-String station;
+char mac[18];
+char station[2] = {0, 0};
 
+#define RAMP_TIME 300
 int rampStates = 0;
 int rampVals = 0;
 int targetVals = 0;
 
-const int RAMP_TIME = 300;
-
 // timer to simplify scheduling events
 Timer<4> timer;
 
-const int MAX_AIR_TIME = 8;
-const int AIR_ON_WAIT = 5;
-float airTime = 0;
+#define MAX_AIR_TIME 8
+#define AIR_ON_WAIT 5
+
 Timer<> air_timer;
 // 0: off and ready, 1: off and cooling down, 2: on
 bool valveState = 0;  
@@ -80,12 +77,13 @@ void blink(){
 }
 
 void parsePacket(AsyncUDPPacket packet){
-  String data(reinterpret_cast<char *>(packet.data()));
+  static int airtime = 0;
 
-  Serial.println("--------");
-  Serial.println(data);
+  auto data = packet.data();
+  blink();
 
-  StaticJsonDocument<1024> doc;
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, data);
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -93,16 +91,10 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  blink();
-  // JsonObject obj = doc.as<JsonObject>();
-
   if(doc.containsKey(mac)){
     JsonObject details = doc[mac];
     if(details.containsKey("station")){
-      // sprintf(station, "%d", details["station"]);
-      station = details["station"].as<String>();
-      Serial.print("updated station to ");
-      Serial.println(station);
+      itoa(details["station"], station, 10);
     }
   }
 
@@ -111,9 +103,6 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   JsonObject parameters = doc[station];
-  String output;
-  serializeJson(parameters, output);
-  Serial.println(output);
 
   int last_error = -1;
 
@@ -183,7 +172,6 @@ void parsePacket(AsyncUDPPacket packet){
 
 bool turnValveOff(void *){
   Serial.println("turnValveOff");
-  //air_timer.cancel();
   digitalWrite(VALVE_PIN, LOW);
   valveState = 1;
 
@@ -197,7 +185,9 @@ bool setValveAvaliable(void*){
 }
 
 bool updateTouch(void*){
+  static int touchCount = 0;
   int count = 0;
+
   for (int i=0; i<2; i++){
     if(touchsensor[i].touching()){
       count++;
@@ -206,8 +196,8 @@ bool updateTouch(void*){
 
   if(count != touchCount){
     touchCount = count;
-    udp.printf("{\"0\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
-    Serial.printf("{\"0\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
+    udp.printf("{\"server\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
+    Serial.printf("{\"server\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
   }
   return true;
 }
@@ -245,9 +235,9 @@ void setup() {
     });
   }
 
-  mac = getMac();
+  getMac();
 
-  Serial.print("MAC: ");
+  Serial.print("** MAC: ");
   Serial.println(mac);
 
   timer.every(10000, ping);
@@ -291,16 +281,15 @@ bool updateRamp(void *) {
   return true;
 }
 
-String getMac() {
+void getMac() {
   byte baseMac[6];
   WiFi.macAddress(baseMac);
-  char baseMacChr[18] = {0};
-  sprintf(
-    baseMacChr, 
+  snprintf(
+    mac, 
+    sizeof(mac),
     "%02X:%02X:%02X:%02X:%02X:%02X", 
     baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]
   );
-  return String(baseMacChr);
 }
 
 
