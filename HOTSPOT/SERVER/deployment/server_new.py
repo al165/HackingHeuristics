@@ -9,6 +9,7 @@ import multiprocessing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
+from pythonosc import dispatcher, osc_server, udp_client
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from translator import Translator, processors
@@ -164,14 +165,7 @@ def lighthouse(mcast_socket):
         (MCAST_GRP, MCAST_PORT)
     )
 
-def rd_sample(mcast_socket):
-    sent = mcast_socket.sendto(
-        bytes(
-            "{\"rd\": {\"type\": \"get_samples\"}}", 
-            'ascii'
-        ), 
-        (MCAST_GRP, MCAST_PORT)
-    )
+
         
 def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
     while True:
@@ -198,6 +192,18 @@ def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
                     callbacks[dest](json_data[dest])
 
 
+def makeOscListener(dispatcher=None):
+    port = 8086
+    server = osc_server.ThreadingOSCUDPServer(
+        ("0.0.0.0", port), dispatcher
+    )
+    print(f"OSC listening on port {port}")
+    return server
+
+client = udp_client.SimpleUDPClient('127.0.0.1', 8085)
+def sentOSC(address: str, args: tuple):
+    client.send_message(address, args)
+
 def getInterfaceIP(interface="wlan0"):
     from subprocess import check_output
 
@@ -215,10 +221,13 @@ def getInterfaceIP(interface="wlan0"):
 
 def main():
     import signal
-    from rd_server import RDServer
     from camera_server import CameraServer
 
     global HOST, PORT
+
+    def broadcast(data):
+        json_data = json.dumps(data)
+        sent = mcast_socket.sendto(bytes(json_data, "ascii"), (MCAST_GRP, MCAST_PORT))
 
     args = parser.parse_args()
     if args.port:
@@ -285,18 +294,6 @@ def main():
         stop_event=stop_event,
     )
 
-    rd_q = multiprocessing.Queue()
-    mailboxes["rd"] = rd_q
-    rd_server = RDServer(
-        stop_event=stop_event, 
-        mcast_socket=mcast_socket,
-        N=100,
-        msg_q=rd_q,
-        save="rd.png",
-    )
-    scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "get_samples"},), seconds=0.5)
-    scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "add_random"},), seconds=4)
-
     camera_q = multiprocessing.Queue()
     mailboxes["camera"] = camera_q
     camera_server = CameraServer(
@@ -308,19 +305,30 @@ def main():
     scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "save"},), seconds=60)
     scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "movement"},), seconds=3)
 
-    def camera_result_callback(data):
-        print("camera_result_callback", data)
-        if data.get("type", None) == "movement":
-            rd_q.put(((HOST, PORT), data))
-
-    callbacks = {
-        "camera_result": camera_result_callback,
-    }
-
     handler_class = makeHTTPServer(server_q)
     httpd = HTTPServer((HOST, PORT), handler_class)
     http_thread = threading.Thread(target=httpd.serve_forever)
     http_thread.daemon = True
+
+    callbacks = {}
+    multicast_thread = threading.Thread(target=multicast_listener, args=(mcast_socket, stop_event, mailboxes, callbacks))
+
+    def handle_rd_samples(*msg):
+        target = msg[1]
+        value = msg[2]
+        samples = dict()
+        samples[target] = value
+        data = dict(rd_samples=samples)
+        broadcast(data)
+
+    # RD
+    scheduler.add_job(sentOSC, 'interval', args=("/add_random", ()), seconds=4)
+    scheduler.add_job(sentOSC, 'interval', args=("/sample", ("1", 0.0, 0.2)), seconds=4)
+
+    disp = dispatcher.Dispatcher()
+    disp.map("/rd_sample", handle_rd_samples)
+    oscd = makeOscListener(disp)
+    osc_listener_thread = threading.Thread(target=oscd.serve_forever)
 
     print()
     print("="*50)
@@ -328,11 +336,12 @@ def main():
     print("="*50)
     print()
 
-    rd_server.start()
     camera_server.start()
     translator.start()
     scheduler.start()
     http_thread.start()
+    multicast_thread.start()
+    osc_listener_thread.start()
 
     print()
     print("READY")
@@ -340,13 +349,16 @@ def main():
     print("Received messages:")
     print("-"*50)
 
-    multicast_listener(mcast_socket, stop_event, mailboxes, callbacks)
+    while True:
+        if stop_event.wait(timeout=1):
+            break
 
     print("\nCLOSING")
 
     httpd.shutdown()
     scheduler.shutdown()
     translator.join()
+    oscd.shutdown()
 
     print("\nDONE")
 

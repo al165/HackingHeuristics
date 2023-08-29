@@ -19,14 +19,21 @@ from threading import Thread, Event
 
 from typing import Optional, Union
 
-from picamera2 import Picamera2
 import numpy as np
 
 from config import MCAST_GRP, MCAST_PORT
 
-# surpress verbose logging of libcamera and picamera2
-os.environ["LIBCAMERA_LOG_LEVELS"] = "3"
-Picamera2.set_logging(Picamera2.ERROR)
+PICAM_AVAILIABLE = True
+try:
+    from picamera2 import Picamera2
+except ImportError:
+    PICAM_AVAILIABLE = False
+    print("/!\\ Picamera2 not avaliable")
+
+if PICAM_AVAILIABLE:
+    # surpress verbose logging of libcamera and picamera2
+    os.environ["LIBCAMERA_LOG_LEVELS"] = "3"
+    Picamera2.set_logging(Picamera2.ERROR)
 
 
 class CameraServer(Thread):
@@ -61,14 +68,17 @@ class CameraServer(Thread):
         if lores_config is None:
             lores_config = {"format": 'YUV420', "size": (320, 240)}
 
-        self.picam2 = Picamera2()
-        self.picam2.configure(
-            self.picam2.create_preview_configuration(
-                main=main_config,
-                lores=lores_config,
+        if PICAM_AVAILIABLE:
+            self.picam2 = Picamera2()
+            self.picam2.configure(
+                self.picam2.create_preview_configuration(
+                    main=main_config,
+                    lores=lores_config,
+                )
             )
-        )
-        self.picam2.start()
+            self.picam2.start()
+        else:
+            self.picam2 = None
 
         self.im_main = None
         self.im_lores = None
@@ -93,6 +103,9 @@ class CameraServer(Thread):
         self.close()
 
     def capture(self) -> bool:
+        if self.picam2 is None:
+            return False
+
         now = time()
         if now < self._last_capture_time + self._wait:
             return False
@@ -138,6 +151,9 @@ class CameraServer(Thread):
         self._wait = 1.0/target_fps
 
     def saveFrame(self, name: Union[Path, str, None]=None):
+        if self.im_main is None:
+            return
+            
         if name is None:
             name = datetime.datetime.now().strftime("%Y%m%d-%X.png")
 
