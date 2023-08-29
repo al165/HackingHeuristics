@@ -196,8 +196,7 @@ bool updateTouch(void*){
 
   if(count != touchCount){
     touchCount = count;
-    udp.printf("{\"server\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
-    Serial.printf("{\"server\":{\"type\": \"sensor\", \"touchCount\": \"%d\"}}\n", touchCount);
+    udp.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": \"%d\"}}\n", touchCount);
   }
   return true;
 }

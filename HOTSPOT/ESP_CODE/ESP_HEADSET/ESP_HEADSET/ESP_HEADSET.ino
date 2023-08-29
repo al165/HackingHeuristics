@@ -251,8 +251,8 @@ void parsePacket(AsyncUDPPacket packet){
     }
   }
 
-  if(parameters.containsKey("touchCount")){
-    int val = parameters["touchCount"].as<int>();
+  if(parameters.containsKey("touch_count")){
+    int val = parameters["touch_count"].as<int>();
     if(val > 0){
       Serial.println("turning on temps");
 

@@ -135,6 +135,7 @@ class Translator(multiprocessing.Process):
             os.mkdir(os.path.join(TRACE_DIR, self.session_name))
 
         self.fieldnames = ["time"] + FEATURE_VECTOR_MAP + OUTPUT_VECTOR + ["map_x", "map_y", "active", "highlight"]
+        self.observers = dict()
 
         print("Translator init done")
 
@@ -265,7 +266,7 @@ class Translator(multiprocessing.Process):
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
                 writer.writeheader()
 
-    def collect(self):
+    def check_messages(self):
         while True:
             try:
                 (host, port), msg = self.msg_q.get(block=False)
@@ -304,8 +305,17 @@ class Translator(multiprocessing.Process):
             elif msg_type == "agent_positions":
                 self.getAgentPositions()
 
+            elif msg_type == "touch_count":
+                data = dict()
+                date[msg["station"]] = msg
+                self.broadcast(data)
+
+                total = self.updateObservers(msg)
+                data = dict(ESP13={"type": "observer_count", "observer_count": total})
+                self.broadcast(data)
+
             else:
-                print(f"Unkown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
+                print(f"Unknown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
 
 
     def handlePingMessage(self, msg, host, port):
@@ -340,6 +350,9 @@ class Translator(multiprocessing.Process):
         if "active" in msg:
             self.agents[host].active = msg["active"]
 
+    def updateObservers(self, msg):
+        self.observers[msg["station"]] = msg["touch_count"]
+        return sum([x for x in self.observers.values()])
 
     def getFeatures(self):
         target = self.getCenter()
@@ -424,10 +437,15 @@ class Translator(multiprocessing.Process):
 
     def getAgentPositions(self):
         data = dict()
-        for host, agent in self.getActiveAgents(filter_type=(ESP.BLOB, ESP.ESP13)).items():
-            data[agent.id] = list(agent.map[-1].astype(float))
+        for host, agent in self.agents.items(): #self.getActiveAgents(filter_type=(ESP.BLOB, ESP.ESP13)).items():
+            if agent.esp_type != ESP.HEADSET:
+                continue
+            data[agent.id] = {"pos": list(agent.map[-1].astype(float)), "active": agent.active}
+
+        if len(data.keys()) == 0:
+            return
+
         data["type"] = "update_points"
-        print("getAgentPositions", data)
         msg = dict(rd=data)
         self.broadcast(msg)
 
@@ -444,7 +462,7 @@ class Translator(multiprocessing.Process):
 
     def run(self):
         while True:
-            self.collect()
+            self.check_messages()
             self.updatePlotQueue() 
 
             if self.stop_event.is_set():

@@ -96,3 +96,5 @@ OUTPUT_VECTOR_RANGES = {
     "airon": [0, 1.0],
     "airtime": [1, 5],
 }
+
+RD_COLOR_MAP = "plasma"

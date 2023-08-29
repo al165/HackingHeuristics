@@ -173,7 +173,7 @@ def rd_sample(mcast_socket):
         (MCAST_GRP, MCAST_PORT)
     )
         
-def multicast_listener(mcast_socket, stop_event, mailboxes):
+def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
     while True:
         if stop_event.is_set():
             break
@@ -192,6 +192,10 @@ def multicast_listener(mcast_socket, stop_event, mailboxes):
             for recipiant, queue in mailboxes.items():
                 if recipiant in json_data:
                     queue.put((addr, json_data[recipiant]))
+
+            for dest in json_data.keys():
+                if dest in callbacks:
+                    callbacks[dest](json_data[dest])
 
 
 def getInterfaceIP(interface="wlan0"):
@@ -212,6 +216,7 @@ def getInterfaceIP(interface="wlan0"):
 def main():
     import signal
     from rd_server import RDServer
+    from camera_server import CameraServer
 
     global HOST, PORT
 
@@ -284,12 +289,33 @@ def main():
     mailboxes["rd"] = rd_q
     rd_server = RDServer(
         stop_event=stop_event, 
-        mcast_socket=mcast_socket, 
+        mcast_socket=mcast_socket,
+        N=100,
         msg_q=rd_q,
         save="rd.png",
     )
     scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "get_samples"},), seconds=0.5)
     scheduler.add_job(add_message, 'interval', args=(rd_q, {"type": "add_random"},), seconds=4)
+
+    camera_q = multiprocessing.Queue()
+    mailboxes["camera"] = camera_q
+    camera_server = CameraServer(
+        stop_event=stop_event,
+        mcast_socket=mcast_socket,
+        msg_q=camera_q,
+        movement_history=3*15,
+    )
+    scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "save"},), seconds=60)
+    scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "movement"},), seconds=3)
+
+    def camera_result_callback(data):
+        print("camera_result_callback", data)
+        if data.get("type", None) == "movement":
+            rd_q.put(((HOST, PORT), data))
+
+    callbacks = {
+        "camera_result": camera_result_callback,
+    }
 
     handler_class = makeHTTPServer(server_q)
     httpd = HTTPServer((HOST, PORT), handler_class)
@@ -303,6 +329,7 @@ def main():
     print()
 
     rd_server.start()
+    camera_server.start()
     translator.start()
     scheduler.start()
     http_thread.start()
@@ -313,7 +340,7 @@ def main():
     print("Received messages:")
     print("-"*50)
 
-    multicast_listener(mcast_socket, stop_event, mailboxes)
+    multicast_listener(mcast_socket, stop_event, mailboxes, callbacks)
 
     print("\nCLOSING")
 

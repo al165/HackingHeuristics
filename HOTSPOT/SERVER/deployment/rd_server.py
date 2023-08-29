@@ -1,17 +1,28 @@
 import json
 import socket
 import threading
+import multiprocessing
+from PIL import Image
 from queue import Empty
 
+import cv2
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from config import MCAST_GRP, MCAST_PORT
+from config import MCAST_GRP, MCAST_PORT, RD_COLOR_MAP
 
 plt.switch_backend('agg')
 
 def interp(a, b, x):
     return a + (b - a) * x
+
+def map_range(x, x1, x2, y1, y2, clip=False):
+    p = (x - x1) / (x2 - x1)
+    if clip:
+        p = min(max(p, 0.0), 1.0)
+    y = y1 + (y2 - y1)*p
+    return y
 
 def xy_to_kf(x, y):
     ''' 
@@ -63,7 +74,7 @@ def get_initial_A_and_B(N, random_influence = 0.1):
     return A, B
 
 
-class RDServer(threading.Thread):
+class RDServer(multiprocessing.Process):
 
     def __init__(
         self, 
@@ -151,8 +162,11 @@ class RDServer(threading.Thread):
         return data
 
     def posToIndex(self, pos):
-        i = np.round(np.interp(pos[0], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
-        j = np.round(np.interp(pos[1], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+        # i = np.round(np.interp(pos[0], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+        # j = np.round(np.interp(pos[1], np.linspace(-1, 1, self.N), np.arange(self.N))).astype(int)
+        i = int(map_range(pos[0], -1, 1, 0, N, True))
+        j = int(map_range(pos[1], -1, 1, 0, N, True))
+
         return i, j
 
     def getSamplePoint(self, pos, which='A'):
@@ -167,27 +181,32 @@ class RDServer(threading.Thread):
         if self.mcast_socket is None:
             return
 
-        msg = dict(rd_samples=data)
+        msg = dict(server=data)
         json_data = json.dumps(msg)
         sent = self.mcast_socket.sendto(bytes(json_data, 'ascii'), (MCAST_GRP, MCAST_PORT))
 
-    def renderFrame(self, focus='A', save=None):       
-        im = self.ax.imshow(self.A, animated=True,vmin=0,cmap='Greys')
-        if focus == 'B':
-            im.set_array(self.B)
-        self.ax.axis('off')
-        self.ax.set_title(focus)
+    def renderFrame(self, focus='A', save=None):
+        data = None
+        if focus == 'A':
+            data = np.clip(np.array(self.A), 0, 1)
+        else:
+            data = np.clip(np.array(self.B), 0, 1)
 
-        for name, pos in self.sample_points.items():
-            i, j = self.posToIndex(pos)
-            self.ax.text(i, j, name, c='red')
+        cmap = mpl.colormaps[RD_COLOR_MAP]
 
-        if save is not None:
-            plt.savefig(save)
+        #im = Image.fromarray(np.uint8(cmap(data)*255))
+        #im.save(save)
 
-        plt.cla()
+        im = np.uint8(cmap(data)*255)
+        cv2.imshow("rd_server", im)
+
+
 
     def run(self):
+        cv2.startWindowThread()
+        # cv2.namedWindow("rd_server", cv2.WND_PROP_FULLSCREEN)
+        # cv2.setWindowProperty("rd_server", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
         while True:
             for _ in range(self.steps_per_frame):
                 self.update()
@@ -195,10 +214,15 @@ class RDServer(threading.Thread):
             if self.save:
                 self.renderFrame('B', save=self.save)
 
+                if cv2.waitKey(0):
+                    self.save = None
+                    cv2.destroyAllWindows()
+
             self.check_messages()
 
             if self.stop_event.is_set():
                 break
+        cv2.destroyAllWindows()
 
     def check_messages(self):
         if self.msg_q is None:
@@ -216,7 +240,11 @@ class RDServer(threading.Thread):
                 for name, pos in msg.items():
                     if name == "type":
                         continue
-                    self.addSamplePoint(name, pos)
+
+                    if not msg["active"]:
+                        self.removeSamplePoint(name)
+                    else:
+                        self.addSamplePoint(name, msg["pos"])
 
             elif msg_type == "remove_point":
                 self.removeSamplePoint(msg["name"])
@@ -229,19 +257,35 @@ class RDServer(threading.Thread):
 
             elif msg_type == "get_samples":
                 if len(self.sample_points) == 0:
-                    return
+                    continue
                 data = self.getSamples()
                 self.broadcast(data)
 
             elif msg_type == "add_random":
                 self.addRandom()
 
-        
+            elif msg_type == "movement":
+                movement = msg["movement"]
+                k = map_range(movement, 2, 70, 0.0463, 0.0646, True)
+                f = map_range(movement, 2, 70, 0.0137, 0.0501, True)
+
+                self.setFK(f, k)
+                print(f"updating FK: {movement:.3f} -> {self.f:.3f}, {self.k:.3f}")
+
+
 def main():
+
+    print(map_range(2, 2, 70, 1.0, 0.1, True), 1.0)
+    print(map_range(35, 2, 70, 1.0, 0.1, True), 0.5)
+    print(map_range(60, 2, 70, 1.0, 0.1, True),2)
+    print(map_range(0.0, 2, 70, 1.0, 0.1, True),2)
+    print(map_range(0.0, 2, 70, 1.0, 0.1, True),2)
+
+
     import signal
     stop_event = threading.Event()
 
-    rd_server = RDServer(stop_event=stop_event)
+    rd_server = RDServer(stop_event=stop_event, save="rd.png")
 
     rd_server.addSamplePoint("0", [0, 0])
     rd_server.addSamplePoint("1", [-0.6, 0.4])
