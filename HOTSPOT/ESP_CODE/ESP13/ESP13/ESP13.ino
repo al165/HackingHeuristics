@@ -7,9 +7,12 @@
 #else
 // ------- ESP8266 constants -------------------
 #include <ESPAsyncUDP.h>
+#undef LED_BUILTIN
 #define LED_BUILTIN 16
-#define LOW 1
+#undef HIGH
 #define HIGH 0
+#undef LOW
+#define LOW 1
 #endif
 
 #include <WiFiManager.h>
@@ -28,11 +31,14 @@ const int UDP_PORT = 10000;
 
 char mac[18];
 
-#define MAX_AIR_TIME 10
+#define MAX_AIR_TIME_S 10
+#define PULSE_ON_TIME_MS 500
 const int VALVE_PINS[] = {26, 16, 17, 18, 19, 23};
-// 0: off and ready, 1: off and cooling down, 2: on
+// 0: off and avaliable, 1: off and deflating 2: on
 bool valveState[] = {0, 0, 0, 0, 0, 0};
 int valveTimes[] = {0, 0, 0, 0, 0, 0};
+float valveProbabilities[] = {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+float probOffset = 0.05;
 
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -59,7 +65,8 @@ bool turnValveOff(void* station){
   digitalWrite(VALVE_PINS[(int)station], LOW);
   valveState[(int)station] = 1;
   // timer.in((int) valveTimes[(int) station], setValveAvaliable, station);
-  // setValveAvaliable(station);
+  timer.in(PULSE_ON_TIME_MS, setValveAvaliable, station);
+  setValveAvaliable(station);
   return true;
 }
 
@@ -80,28 +87,26 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  if(doc.containsKey("rd_samples")){
-    JsonObject parameters = doc["rd_samples"];
-    delay(100);
-    for(int station = 0; station < 6; station++){
-      char name[2] = {0};
-      itoa(station, name, 10);
+  if(doc.containsKey("movement")){
+    Serial.println((float)doc["movement"]);
+    float movement = doc["movement"];
+    probOffset = map(movement, 2, 80, 0.10, 0.01, true);
+    Serial.print("probOffset set to ");
+    Serial.println(probOffset);
+  }
 
-      if(!parameters.containsKey(name)){
-        continue;
-      }
+  if(doc.containsKey("triggered")){
+    const char* name = doc["triggered"].as<const char *>();
+    int station = atoi(name);
 
-      float val = parameters[name];
+    float prob = valveProbabilities[station] + probOffset;
+    float p = random(10000) / 10000;
 
-      if(val > 0.5 && valveState[station] == 0){
-        Serial.printf("valve %u activated\n", station);
-        digitalWrite(VALVE_PINS[station], HIGH);
-        valveState[station] = 2;
-        timer.in(500, turnValveOff, (void *)station);
-      } else if(val < 0.5 && valveState[station] == 1){
-        setValveAvaliable((void*) station);
-      }
-
+    if(p < prob){
+      Serial.printf("valve %s activated\n", name);
+      digitalWrite(VALVE_PINS[station], HIGH);
+      valveState[station] = 2;
+      timer.in(500, turnValveOff, (void *)station);
     }
 
   }
@@ -112,6 +117,8 @@ void parsePacket(AsyncUDPPacket packet){
 void setup() {
   Serial.begin(115200);
   Serial.println();
+
+  randomSeed(analogRead(0));
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
@@ -176,4 +183,16 @@ void getMac() {
     "%02X:%02X:%02X:%02X:%02X:%02X", 
     baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]
   );
+}
+
+float map(float x, float x1, float x2, float y1, float y2, bool clip){
+  float p = (x2 - x) / (y2 / y1);
+  if(clip){
+    p = constrain(p, 0, 1);
+  }
+  return y1 + p * (y2 - y1);
+}
+
+float map(float x, float x1, float x2, float y1, float y2){
+  return map(x, x1, x2, y1, y2, false);
 }

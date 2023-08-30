@@ -117,6 +117,7 @@ def makeHTTPServer(msg_q):
             )
 
         def do_POST(self):
+            self._set_response()
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length)
 
@@ -127,11 +128,14 @@ def makeHTTPServer(msg_q):
                 self._set_response()
                 return
 
+            # print()
+            # print("do_POST received:")
             # print(json_data)
+            # print()
+
             addr = self.client_address
             values = processBuffer(json_data)
             if "server" not in values:
-                self._set_response()
                 return
 
             values = values["server"]
@@ -148,7 +152,6 @@ def makeHTTPServer(msg_q):
                 values[dk] = processors[name](np.array(v, dtype=float))
 
             msg_q.put((addr, values))
-            self._set_response()
 
         def log_request(self, code='-', size='-'): 
             return
@@ -159,7 +162,7 @@ def makeHTTPServer(msg_q):
 def lighthouse(mcast_socket):
     sent = mcast_socket.sendto(
         bytes(
-            "{\"all\": {\"type\": \"lighthouse\", \"port\": " + str(PORT) + "}}", 
+            "{\"all\": {\"type\": \"lighthouse\", \"port\": " + str(PORT) + ", \"host\": \"" + str(HOST) + "\"}}", 
             'ascii'
         ), 
         (MCAST_GRP, MCAST_PORT)
@@ -201,7 +204,7 @@ def makeOscListener(dispatcher=None):
     return server
 
 client = udp_client.SimpleUDPClient('127.0.0.1', 8085)
-def sentOSC(address: str, args: tuple):
+def sendOSC(address: str, args: tuple):
     client.send_message(address, args)
 
 def getInterfaceIP(interface="wlan0"):
@@ -310,23 +313,29 @@ def main():
     http_thread = threading.Thread(target=httpd.serve_forever)
     http_thread.daemon = True
 
-    callbacks = {}
+    def handle_rd_broadcast(msg):
+        msg_type = msg.get("type", "unknown")
+        if msg_type == "update_points":
+            for id_, data in msg.items():
+                if id_ == "type":
+                    continue
+                pos = data["pos"]
+                sendOSC("/update_points", (id_, data["active"], pos[0], pos[1]))
+
+    callbacks = {
+        "rd": handle_rd_broadcast,
+    }
     multicast_thread = threading.Thread(target=multicast_listener, args=(mcast_socket, stop_event, mailboxes, callbacks))
 
-    def handle_rd_samples(*msg):
-        target = msg[1]
-        value = msg[2]
-        samples = dict()
-        samples[target] = value
-        data = dict(rd_samples=samples)
+    def handle_rd_trigger(*msg):
+        data = {"triggered": msg[1], "type": "triggered"}
         broadcast(data)
 
     # RD
-    scheduler.add_job(sentOSC, 'interval', args=("/add_random", ()), seconds=4)
-    scheduler.add_job(sentOSC, 'interval', args=("/sample", ("1", 0.0, 0.2)), seconds=4)
+    scheduler.add_job(sendOSC, 'interval', args=("/add_random", ()), seconds=4)
 
     disp = dispatcher.Dispatcher()
-    disp.map("/rd_sample", handle_rd_samples)
+    disp.map("/rd_trigger", handle_rd_trigger)
     oscd = makeOscListener(disp)
     osc_listener_thread = threading.Thread(target=oscd.serve_forever)
 

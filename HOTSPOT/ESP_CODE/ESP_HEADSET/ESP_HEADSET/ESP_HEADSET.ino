@@ -26,7 +26,7 @@ const int MAX_ANALOG_INPUT = 4095;
 // ------- ESP8266 constants -------------------
 #include <ESP8266HTTPClient.h>
 #include <ESPAsyncUDP.h>
-// #include <ESP8266WiFi.h>
+#undef LED_BUILTIN
 #define LED_BUILTIN 16
 const int SENSOR0 = A0;  // EEG
 const int SENSOR1 = A0;  // EOG
@@ -34,9 +34,13 @@ const int SENSOR2 = A0;  // heart rate sensor
 const int SENSOR3 = A0;  // GSR
 const int MAX_ANALOG_INPUT = 1023;
 // Temperature Pins :
+#undef AIN1
 #define AIN1 4
+#undef AIN2
 #define AIN2 5
+#undef BIN1
 #define BIN1 12
+#undef BIN2
 #define BIN2 13
 // ----------------------------------------------
 #endif
@@ -106,11 +110,11 @@ Timer<> blink_timer;
 bool ping(void *){
   udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
   blink();
-  // Serial.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac);
   return true;
 }
 
 void blink(){
+  digitalWrite(LED_BUILTIN, LOW);
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
   blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
@@ -134,7 +138,7 @@ bool pulse(void *){
 bool readPins(void *){
   static int data_ptr = 0;
   static int avg_active = 0;
-  static bool active = false;
+  static bool active = true;
   static bool sleep_post = false;
 
   reads[0] = analogRead(SENSOR0);
@@ -189,8 +193,10 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
+      // Serial.println(httpResponseCode);
     }
     http.end();
+    // Serial.println("done");
 
     blink();
 
@@ -211,9 +217,8 @@ bool turnTempsOff(void *){
 
 void parsePacket(AsyncUDPPacket packet){
   auto data = packet.data();
-  blink();
 
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -299,8 +304,8 @@ void setup() {
   }
   display.clearDisplay();
 
-  ledcSetup(LED_BUILTIN, 5000, 8);
-  ledcAttachPin(LED_BUILTIN, 0);
+  // ledcSetup(LED_BUILTIN, 5000, 8);
+  // ledcAttachPin(LED_BUILTIN, 0);
 
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
@@ -347,7 +352,6 @@ void setup() {
 }
 
 void loop() {
-  // Serial.print("loop");
   timer.tick();
   blink_timer.tick();
 }
@@ -401,6 +405,9 @@ void getMac() {
 }
 
 void connect(){
+  if(connected){
+    return;
+  }
   snprintf(
     SERVER_URL,
     sizeof(SERVER_URL),
@@ -412,5 +419,6 @@ void connect(){
     port
   );
   connected = true;
+  Serial.println("connected");
   udp.print("{\"server\":{\"type\": \"whoami\"}}");
 }

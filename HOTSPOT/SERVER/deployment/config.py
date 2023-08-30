@@ -9,12 +9,10 @@ PORT = 8080
 MCAST_GRP = '224.3.29.71'
 MCAST_PORT = 10000
 
-
+########################
 # ESP and their stations
 #         MAC ADDRESS  : (station, id, type)
 STATIONS = {
-    "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0
-    "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0
     "3C:61:05:D1:87:EF": (1, 1, ESP.HEADSET),   # HEADSET 1
     "40:22:D8:7A:27:D8": (1, 7, ESP.BLOB),      # BLOB 1
     "C0:49:EF:E4:60:BC": (2, 2, ESP.HEADSET),   # HEADSET 2
@@ -25,8 +23,11 @@ STATIONS = {
     "E9:DB:84:C5:C2:B5": (4, 10, ESP.BLOB),     # BLOB 4
     "C4:4F:33:65:DA:80": (5, 5, ESP.HEADSET),   # HEADSET 5
     "E9:DB:84:C5:C2:B6": (5, 11, ESP.BLOB),     # BLOB 5
-    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13
+    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13       # DEBUG ESP
+    "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0   # DEBUG ESP
+    "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0      # DEBUG ESP
 }
+########################
 
 
 # Save directory to store data traces

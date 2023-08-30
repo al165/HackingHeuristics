@@ -15,6 +15,7 @@
 #else
 // ------- ESP8266 constants -------------------
 #include <ESPAsyncUDP.h>
+#undef LED_BUILTIN
 #define LED_BUILTIN 16
 #endif
 

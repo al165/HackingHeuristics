@@ -138,6 +138,8 @@ class CameraServer(Thread):
             msg_type = msg.get("type", "unknown")
 
             if msg_type == "movement":
+                if not PICAM_AVAILIABLE:
+                    continue
                 data = {"type": "movement", "movement": self.movement}
                 self.broadcast(data)
 
@@ -153,7 +155,7 @@ class CameraServer(Thread):
     def saveFrame(self, name: Union[Path, str, None]=None):
         if self.im_main is None:
             return
-            
+
         if name is None:
             name = datetime.datetime.now().strftime("%Y%m%d-%X.png")
 
