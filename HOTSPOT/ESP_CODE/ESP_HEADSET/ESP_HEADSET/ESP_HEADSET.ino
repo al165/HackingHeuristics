@@ -166,16 +166,15 @@ bool readPins(void *){
 
   if(data_ptr >= DATA_LENGTH) {
     active = (float) avg_active / DATA_LENGTH > 8.0;
+    if(active) Serial.println("active");
 
     data_ptr = 0;
     avg_active = 0;
 
     if(!connected){
-      Serial.println("notsending - not active");
       return true;
     }
     if(sleep_post){;
-      Serial.println("notsending - not active");
       sleep_post = !active;
       return true;
     }
@@ -443,5 +442,6 @@ void connect(){
   );
   connected = true;
   Serial.println("connected");
-  udp.print("{\"server\":{\"type\": \"whoami\"}}");
+  Serial.println(SERVER_URL);
+  udp.println("{\"server\":{\"type\": \"whoami\"}}");
 }

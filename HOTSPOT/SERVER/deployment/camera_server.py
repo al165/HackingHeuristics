@@ -41,15 +41,16 @@ class CameraServer(Thread):
 
     def __init__(
         self, 
-        stop_event=Event, 
-        msg_q: Optional[Queue]=None,
-        main_config: Optional[dict]=None,
-        lores_config: Optional[dict]=None,
-        target_fps: float=15,
-        mcast_socket: socket.socket=None,
-        save_root: Union[str,Path]="./camera_images",
-        movement_history: int=15,
-        capture_high: bool=False,
+        stop_event: Event, 
+        msg_q: Optional[Queue] = None,
+        main_config: Optional[dict] = None,
+        lores_config: Optional[dict] = None,
+        target_fps: float = 15,
+        mcast_socket: socket.socket = None,
+        save_root: Union[str,Path] = "./camera_images",
+        movement_history: int = 15,
+        capture_high: bool = False,
+        state_d: dict = {}
     ):
         super(CameraServer, self).__init__()
 
@@ -59,6 +60,7 @@ class CameraServer(Thread):
         self.mcast_socket = mcast_socket
         self.save_root = save_root
         self.capture_high = capture_high
+        self.state_d = state_d
 
         os.makedirs(self.save_root, exist_ok=True)
 
@@ -79,6 +81,8 @@ class CameraServer(Thread):
             self.picam2.start()
         else:
             self.picam2 = None
+
+        self.state_d["camera_server"] = {"picama2": PICAM_AVAILIABLE}
 
         self.im_main = None
         self.im_lores = None
@@ -126,6 +130,9 @@ class CameraServer(Thread):
         self._prev_movement = np.roll(self._prev_movement, 1)
         self._prev_movement[0] = move
         self.movement = np.mean(self._prev_movement)
+        state = self.state_d["camera_server"]
+        state["movement"] = self.movement
+        self.state_d["camera_server"] = state
 
     def check_messages(self):
         if self.msg_q is None:
@@ -138,18 +145,19 @@ class CameraServer(Thread):
                 break
 
             msg_type = msg.get("type", "unknown")
+            state = self.state_d["camera_server"]
+            state["last_camera_msg"] = msg
+            self.state_d["camera_server"] = state
 
             if msg_type == "movement":
                 if not PICAM_AVAILIABLE:
                     continue
-                #print(f"movement: {self.movement}")
                 data = {"type": "movement", "movement": self.movement}
                 self.broadcast(data)
 
             elif msg_type == "save":
                 name = msg.get("name", None)
                 self.saveFrame(name)
-
 
     def setFPS(self, target_fps: float):
         self.target_fps = target_fps

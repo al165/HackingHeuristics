@@ -104,11 +104,14 @@ class Translator(multiprocessing.Process):
         mcast_socket: socket.socket = None,
         load_latest: bool = False,
         save_trace: bool = False,
+        state_d: dict = {},
     ):
 
         super(Translator, self).__init__()
         self.msg_q = msg_q
         self.plot_q = plot_q
+        self.state_d = state_d
+        state_d["ESPS"] = dict()
 
         self.stop_event = stop_event
 
@@ -137,7 +140,16 @@ class Translator(multiprocessing.Process):
         self.fieldnames = ["time"] + FEATURE_VECTOR_MAP + OUTPUT_VECTOR + ["map_x", "map_y", "active", "highlight"]
         self.observers = dict()
 
+        self.init_networks()
         print("Translator init done")
+
+    def init_networks(self):
+        x = np.zeros(len(FEATURE_VECTOR_MAP))
+        z = self.embedderNetwork(x)
+
+        a = np.concatenate([z, self.getCenter()])
+        self.translator.get_action(a, False)
+
 
     def getActiveAgents(self, filter_type: Tuple[ESP] = ()) -> Dict[str, Agent]:
         active = dict()
@@ -270,13 +282,13 @@ class Translator(multiprocessing.Process):
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
                 writer.writeheader()
 
-    def saveState(self):
-        state = dict()
 
+    def updateState(self):
+        esp_state = dict()
         for host, agent in self.agents.items():
             id_ = agent.id
             
-            state[id_] = {
+            esp_state[id_] = {
                 "esp_type": agent.esp_type.name,
                 "active": agent.active,
                 "station": agent.station,
@@ -287,8 +299,11 @@ class Translator(multiprocessing.Process):
                 "highlight": agent.highlight,
             }
 
+        self.state_d["ESPS"] = esp_state
+
+    def saveState(self):
         with open("./state.json", "w") as f:
-            json.dump(state, f, sort_keys=True, indent=4)
+            json.dump(self.state, f, sort_keys=True, indent=4)
 
     def checkMessages(self):
         while True:
@@ -297,7 +312,13 @@ class Translator(multiprocessing.Process):
             except Empty:
                 break
 
+            if not isinstance(msg, dict):
+                continue
+
             msg_type = msg.get("type", "unknown")
+
+            if msg_type != "update_state":
+                self.state_d["last_server_msg"] = msg
 
             if msg_type == "ping":
                 self.handlePingMessage(msg, host, port)
@@ -305,6 +326,9 @@ class Translator(multiprocessing.Process):
             elif msg_type == "sensor":
                 self.handleSensorMessage(msg, host, port)
                 self.updated = True
+
+            elif msg_type == "raw_sensor":
+                self.processRawData(msg, host, port)
 
             elif msg_type == "whoami":
                 if host not in self.agents:
@@ -341,6 +365,9 @@ class Translator(multiprocessing.Process):
             elif msg_type == "save_state":
                 self.saveState()
 
+            elif msg_type == "update_state":
+                self.updateState()
+
             else:
                 print(f"Unknown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
 
@@ -352,6 +379,20 @@ class Translator(multiprocessing.Process):
             return
 
         self.agents[host].last_ping_time = time()
+
+    def processRawData(self, msg, host, port):
+        values = dict(msg)
+        for dk, v in msg.items():
+            try:
+                name = DATA_NAME_MAP[dk]
+            except KeyError:
+                continue
+
+            if name not in processors:
+                continue
+            values[dk] = processors[name](np.array(v, dtype=float))
+
+        self.handleSensorMessage(values, host, port)
 
     def handleSensorMessage(self, msg, host, port):
         if host not in self.agents:

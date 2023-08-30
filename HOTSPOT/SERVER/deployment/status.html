@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>HOTSPOT Live Status</title>
+    <style>
+        #result {
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: black;
+        }
+        .string { color: darkred; }
+        .number { color: green; }
+        .boolean { color: blue; font-weight: bold; }
+        .null { color: magenta; }
+        .key { color: black; }
+    </style>
+</head>
+<body>
+    <span id="time"></span>
+    <pre id="result"></pre>
+    <script>
+
+
+getStatus()
+
+function getStatus(){
+    // console.log("getStatus");
+    fetch("http://localhost:8080/status").then((res) => {
+        return res.json();
+    }).then((json_data) => {
+        data = JSON.stringify(json_data, undefined, 2);
+        htm = syntaxHighlight(data);
+        document.querySelector("#result").innerHTML = htm;
+
+        let date = new Date();
+        document.querySelector("#time").innerText = date.toJSON();
+        setTimeout(getStatus, 200);
+    }).catch((err) => {
+        console.log(err)
+        let date = new Date();
+        document.querySelector("#time").innerText = date.toJSON();
+        setTimeout(getStatus, 200);
+    });
+}
+
+function syntaxHighlight(json) {
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+        var cls = 'number';
+        if (/^"/.test(match)) {
+            if (/:$/.test(match)) {
+                cls = 'key';
+            } else {
+                cls = 'string';
+            }
+        } else if (/true|false/.test(match)) {
+            cls = 'boolean';
+        } else if (/null/.test(match)) {
+            cls = 'null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+    });
+}
+    </script>
+</body>
+</html>

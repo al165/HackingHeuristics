@@ -27,7 +27,7 @@ STATIONS = {
     "24:6F:28:83:66:50": (5, 11, ESP.BLOB),     # BLOB 5
     "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
     "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13         # TESTING ESP
-    # "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
+    "C4:4F:33:65:DA:79": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
     # "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
 }
 ########################

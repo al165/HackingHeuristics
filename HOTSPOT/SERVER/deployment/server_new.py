@@ -6,13 +6,13 @@ import socket
 import argparse
 import threading
 import multiprocessing
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, SimpleHTTPRequestHandler
 
 import numpy as np
 from pythonosc import dispatcher, osc_server, udp_client
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from translator import Translator, processors
+from translator import Translator
 
 from config import (
     HOST,
@@ -94,10 +94,23 @@ def processBuffer(data):
         return {"data0": [], "data1": [], "data2": [], "data3": [], "active": False, "type": "sensor"}
 
 
-def makeHTTPServer(msg_q):
+class NumpyEncoder(json.JSONEncoder):
+    """ Special json encoder for numpy types """
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
+
+def makeHTTPServer(msg_q, state):
     class HH_HttpServer(BaseHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             self.msg_q = msg_q
+            self.state = state
             super(HH_HttpServer, self).__init__(*args, **kwargs)
 
         def _set_response(self):
@@ -107,14 +120,36 @@ def makeHTTPServer(msg_q):
 
         def do_GET(self):
             self.send_response(200, 'OK')
-            self.send_header('Content-type', 'html')
-            self.end_headers()
-            self.wfile.write(
-                bytes(
-                    "<html> <head><title> HOTSPOT Server </title> </head> <body>Online</body>", 
-                    'ascii'
+
+            if self.path == "/":
+                self.send_header('Content-type', 'html')
+                self.end_headers()
+
+                with open('./status.html', 'rb') as file: 
+                    self.wfile.write(file.read()) 
+
+            elif self.path == "/status":
+                self.send_header('Content-type', 'json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                # state = {"test": "status", "alive": False, "list": [1, 2, 3]}
+                state = dict(self.state)
+                json_string = json.dumps(state, indent=4, sort_keys=True, cls=NumpyEncoder)
+                self.wfile.write(
+                    bytes(
+                        json_string,
+                        'ascii'
+                    )
                 )
-            )
+            else:
+                self.send_header('Content-type', 'html')
+                self.end_headers()
+                self.wfile.write(
+                    bytes(
+                        "<html> <head><title> HOTSPOT Server </title> </head> <body>Online</body>", 
+                        'ascii'
+                    )
+                )
 
         def do_POST(self):
             self._set_response()
@@ -139,17 +174,7 @@ def makeHTTPServer(msg_q):
                 return
 
             values = values["server"]
-
-            for dk, v in values.items():
-                try:
-                    name = DATA_NAME_MAP[dk]
-                except KeyError:
-                    continue
-
-                if name not in processors:
-                    continue
-
-                values[dk] = processors[name](np.array(v, dtype=float))
+            values["type"] = "raw_sensor"
 
             msg_q.put((addr, values))
 
@@ -168,9 +193,8 @@ def lighthouse(mcast_socket):
         (MCAST_GRP, MCAST_PORT)
     )
 
-
         
-def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
+def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}, state_d={}):
     while True:
         if stop_event.is_set():
             break
@@ -182,6 +206,7 @@ def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
         else:
             try:
                 json_data = json.loads(data.decode('ascii'))
+                state_d["last_multicast_msg"] = json_data
                 # print(json_data)
             except json.decoder.JSONDecodeError:
                 print("error parsing", data.decode('ascii'))
@@ -262,12 +287,15 @@ def main():
 
     ttl = struct.pack('b', 1)
     mcast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+    mcast_socket.settimeout(2)
     
     stop_event = threading.Event()
     mailboxes = dict()
     server_q = multiprocessing.Queue()
-    mailboxes["server"] = server_q
+    manager = multiprocessing.Manager()
+    state = manager.dict()
 
+    mailboxes["server"] = server_q
 
     def signal_handler(signum, frame):
         print("\nClosing server")
@@ -284,7 +312,7 @@ def main():
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "features"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "output"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "agent_positions"},), seconds=2)
-    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "save_state"},), seconds=0.5)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "update_state"},), seconds=0.2)
 
     translator = Translator(
         server_q,
@@ -296,6 +324,7 @@ def main():
         load_latest=args.load,
         save_trace=args.trace,
         stop_event=stop_event,
+        state_d=state,
     )
 
     camera_q = multiprocessing.Queue()
@@ -305,12 +334,14 @@ def main():
         mcast_socket=mcast_socket,
         msg_q=camera_q,
         movement_history=3*15,
+        state_d=state,
     )
     scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "save"},), seconds=60)
     scheduler.add_job(add_message, 'interval', args=(camera_q, {"type": "movement"},), seconds=3)
 
-    handler_class = makeHTTPServer(server_q)
-    httpd = HTTPServer((HOST, PORT), handler_class)
+    handler_class = makeHTTPServer(server_q, state)
+    httpd = HTTPServer(("", PORT), handler_class)
+    httpd.timeout = 3
     http_thread = threading.Thread(target=httpd.serve_forever)
     http_thread.daemon = True
 
@@ -326,7 +357,10 @@ def main():
     callbacks = {
         "rd": handle_rd_broadcast,
     }
-    multicast_thread = threading.Thread(target=multicast_listener, args=(mcast_socket, stop_event, mailboxes, callbacks))
+    multicast_thread = threading.Thread(
+        target=multicast_listener, 
+        args=(mcast_socket, stop_event, mailboxes, callbacks, state)
+    )
 
     def handle_rd_trigger(*msg):
         data = {"triggered": msg[1], "type": "triggered"}
@@ -343,6 +377,12 @@ def main():
     print()
     print("="*50)
     print(f"  HTTP Server:       {HOST}:{PORT}")
+    print("="*50)
+    print()
+
+    print()
+    print("="*50)
+    print(f" Visit: http://{HOST}:{PORT}/ for live status")
     print("="*50)
     print()
 
