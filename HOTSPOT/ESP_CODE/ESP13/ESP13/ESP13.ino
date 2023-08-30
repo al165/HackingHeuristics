@@ -19,9 +19,9 @@
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+// #include <Wire.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
 
 WiFiManager wm;
 AsyncUDP udp;
@@ -44,7 +44,7 @@ float probOffset = 0.05;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 Timer<12> timer;
 Timer<> blink_timer;
@@ -63,10 +63,16 @@ void blink(){
 }
 
 bool breathe(void* station){
-  if(random(10000)/10000 < probOffset){
+  Serial.println("breathe");
+  float p = random(10000)/10000.0;
+  // Serial.printf("%f p %f probOffset", p, probOffset);
+
+  if(p < probOffset){
     int i = random(6);
     turnValveOn((void*) i);
+    Serial.print("on");
   }
+
   breath_timer.in(1000 + random(5000), breathe);
   return true;
 }
@@ -97,7 +103,7 @@ void parsePacket(AsyncUDPPacket packet){
   auto data = packet.data();
   blink();
 
-  StaticJsonDocument<512> doc;
+  DynamicJsonDocument doc(4096);
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -106,9 +112,10 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   if(doc.containsKey("camera_result")){
-    Serial.println((float)doc["camera_result"]);
+    // Serial.println((float)doc["camera_result"]);
     float movement = doc["camera_result"]["movement"];
-    probOffset = map(movement, 2, 80, 0.10, 0.01, true);
+    probOffset = map(movement, 0, 1, 0.10, 0.01, true);
+    Serial.printf("movement: %f\n", movement);
     Serial.print("probOffset set to ");
     Serial.println(probOffset);
   }
@@ -118,13 +125,14 @@ void parsePacket(AsyncUDPPacket packet){
     int station = atoi(name);
 
     float prob = valveProbabilities[station] + probOffset;
-    float p = random(10000) / 10000;
+    float p = random(10000) / 10000.0;
+
+    // Serial.printf("%u station %u prob %u p", station, prob, p);
 
     if(p < prob){
-      Serial.printf("valve %s activated\n", name);
+      // Serial.printf("valve %s activated\n", name);
       turnValveOn((void*)station);
     }
-
   }
 
   if(doc.containsKey("ESP13")){
@@ -140,9 +148,19 @@ void parsePacket(AsyncUDPPacket packet){
     if(!doc.containsKey(name)){
       continue;
     }
+    if(!doc[name].containsKey("touch_count")){
+      continue;
+    }
 
     int observers = doc[name]["touch_count"];
     valveProbabilities[i] = 0.5*observers;
+    Serial.print("probability for ");
+    Serial.print(i);
+    Serial.print(" set to ");
+    Serial.print(valveProbabilities[i]);
+    Serial.print(" touchers: ");
+    Serial.println(observers);
+
   }
 
 }
@@ -183,17 +201,17 @@ void setup() {
   }
 
   // init screen...
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;);
-  }
+  // if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+  //   Serial.println(F("SSD1306 allocation failed"));
+  //   for(;;);
+  // }
 
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.setCursor(20, 20);
-  display.println(" ..START UP..");
-  display.display(); 
+  // display.clearDisplay();
+  // display.setTextSize(2);
+  // display.setTextColor(WHITE);
+  // display.setCursor(20, 20);
+  // display.println(" ..START UP..");
+  // display.display(); 
 
   getMac();
   Serial.print("** MAC: ");
@@ -222,7 +240,7 @@ void getMac() {
 }
 
 float map(float x, float x1, float x2, float y1, float y2, bool clip){
-  float p = (x2 - x) / (y2 / y1);
+  float p = (x2 - x) / (x2 - x1);
   if(clip){
     p = constrain(p, 0, 1);
   }

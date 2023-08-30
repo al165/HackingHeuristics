@@ -31,7 +31,7 @@
 #define VALVE_PIN 15
 
 #define TOUCH_HISTORY_LEN 6 // history length 
-#define TOUCH_HYSTERESIS 8 // this is the sensitivity
+#define TOUCH_HYSTERESIS 2 // this is the sensitivity
 const int TOUCH_PIN[] = {T9, T8};
 
 NoiselessTouchESP32 touchsensor1(TOUCH_PIN[0], TOUCH_HISTORY_LEN, TOUCH_HYSTERESIS);
@@ -66,7 +66,7 @@ Timer<> blink_timer;
 
 
 bool ping(void *){
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac.c_str());
+  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
   blink();
   return true;
 }
@@ -78,13 +78,12 @@ void blink(){
 }
 
 void parsePacket(AsyncUDPPacket packet){
-  static int airtime = 0;
+  static int airTime = 0;
 
   auto data = packet.data();
   blink();
 
   DynamicJsonDocument doc(1024);
-  DeserializationError error = deserializeJson(doc, data);
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -196,8 +195,13 @@ bool updateTouch(void*){
   }
 
   if(count != touchCount){
+    Serial.print("count ");
+    Serial.println(count);
+    Serial.print("touchCount ");
+    Serial.println(touchCount);
+
     touchCount = count;
-    udp.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": \"%d\"}}\n", touchCount);
+    udp.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
   }
   return true;
 }
