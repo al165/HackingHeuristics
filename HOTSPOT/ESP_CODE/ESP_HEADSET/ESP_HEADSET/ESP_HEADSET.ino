@@ -12,7 +12,7 @@
 // ------- ESP32 constants ---------------------
 #include <HTTPClient.h>
 #include <AsyncUDP.h>
-#define LED_BUILTIN 2
+#define LED_BLINK 2
 const int SENSOR0 = 34;  // EEG
 const int SENSOR1 = 32;  // EOG
 const int SENSOR2 = 39;  // heart rate sensor
@@ -26,8 +26,8 @@ const int MAX_ANALOG_INPUT = 4095;
 // ------- ESP8266 constants -------------------
 #include <ESP8266HTTPClient.h>
 #include <ESPAsyncUDP.h>
-#undef LED_BUILTIN
-#define LED_BUILTIN 16
+#undef LED_BLINK
+#define LED_BLINK 16
 const int SENSOR0 = A0;  // EEG
 const int SENSOR1 = A0;  // EOG
 const int SENSOR2 = A0;  // heart rate sensor
@@ -58,13 +58,22 @@ const int MAX_ANALOG_INPUT = 1023;
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#define SCREEN_WIDTH 128 
-#define SCREEN_HEIGHT 64 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-char screenMessage[32];
+// #include <Wire.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
+// #define SCREEN_WIDTH 128 
+// #define SCREEN_HEIGHT 64 
+// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// char screenMessage[32];
+
+// #include <U8x8lib.h>
+// #ifdef U8X8_HAVE_HW_SPI
+// #include <SPI.h>
+// #endif
+
+// U8X8_SSD1306_128X64_NONAME_4W_SW_SPI u8x8(23, 21, 23, 21, U8X8_PIN_NONE);
+
+
 
 WiFiManager wm;
 AsyncUDP udp;
@@ -103,7 +112,7 @@ SensorData sensorData;
 const long TEMP_ON = 5000;
 
 // timer to simplify scheduling events
-Timer<6> timer;
+Timer<12> timer;
 Timer<> blink_timer;
 
 
@@ -114,17 +123,18 @@ bool ping(void *){
 }
 
 void blink(){
-  digitalWrite(LED_BUILTIN, LOW);
+  // digitalWrite(LED_BLINK, LOW);
+  // Serial.println("blink");
   blink_timer.cancel();
-  digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
+  digitalWrite(LED_BLINK, HIGH);
+  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BLINK, LOW);return true;} );
 }
 
 bool pulse(void *){
   static int fade_amt = -1;
   static int brightness = 128;
 
-  ledcWrite(LED_BUILTIN, brightness);
+  ledcWrite(LED_BLINK, brightness);
 
   if(brightness <= 0 || brightness >= 255){
     fade_amt = -fade_amt;
@@ -160,7 +170,12 @@ bool readPins(void *){
     data_ptr = 0;
     avg_active = 0;
 
-    if(!connected || sleep_post){
+    if(!connected){
+      Serial.println("notsending - not active");
+      return true;
+    }
+    if(sleep_post){;
+      Serial.println("notsending - not active");
       sleep_post = !active;
       return true;
     }
@@ -193,10 +208,9 @@ bool readPins(void *){
     int httpResponseCode = http.POST(output);
     if(httpResponseCode < 200 || httpResponseCode >= 300){
       connected = false;
-      // Serial.println(httpResponseCode);
+      Serial.println(httpResponseCode);
     }
     http.end();
-    // Serial.println("done");
 
     blink();
 
@@ -216,7 +230,9 @@ bool turnTempsOff(void *){
 }
 
 void parsePacket(AsyncUDPPacket packet){
+  // Serial.print("parsePacket... ");
   auto data = packet.data();
+  blink();
 
   DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, data);
@@ -228,6 +244,7 @@ void parsePacket(AsyncUDPPacket packet){
 
   if(doc.containsKey("all")){
     if(doc["all"]["type"] == "lighthouse"){
+      Serial.println("lighthouse");
       host = packet.remoteIP();
       port = doc["all"]["port"];
       connect();
@@ -242,6 +259,7 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   if(!doc.containsKey(station)){
+    // Serial.println("done");
     return;
   }
 
@@ -277,6 +295,7 @@ void parsePacket(AsyncUDPPacket packet){
       turnTempsOff(0);
     }
   }
+  // Serial.println("done");
 
   return;
 }
@@ -291,21 +310,21 @@ void setup() {
   pinMode(BIN2, OUTPUT);
 
   pinMode(IND1, OUTPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED_BLINK, OUTPUT);
+  digitalWrite(LED_BLINK, LOW);
 
   digitalWrite(AIN1, LOW);
   digitalWrite(AIN2, LOW);
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, LOW);
 
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;);
-  }
-  display.clearDisplay();
+  // u8x8.begin();
+  // u8x8.setPowerSave(0);
 
-  // ledcSetup(LED_BUILTIN, 5000, 8);
-  // ledcAttachPin(LED_BUILTIN, 0);
+  // if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+  //   Serial.println(F("SSD1306 allocation failed"));
+  //   for(;;);
+  // }
 
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
@@ -340,15 +359,13 @@ void setup() {
   // screenMessage = "* MAC " + mac + " *";
   // timer.in(4000, [](void*) -> bool {screenMessage[0] = 0; return true;});
 
-  timer.every(10000, ping);
+  timer.every(2000, ping);
   timer.every(1000/SAMPLE_RATE, readPins);
-  timer.every(100, updateScreen);
+  // timer.every(200, updateScreen);
 
   ping(0);
   connect();
 
-  Serial.print("json_capacity ");
-  Serial.println(json_capacity);
 }
 
 void loop() {
@@ -356,15 +373,21 @@ void loop() {
   blink_timer.tick();
 }
 
-bool updateScreen(void*) {
-  display.clearDisplay();
-  
+void updateScreen() {
+  Serial.println("updateScreen");
+  // u8x8.setFont(u8x8_font_chroma48medium8_r);
+  // u8x8.drawString(0,1,"Hello World!");
+  // u8x8.setInverseFont(1);
+  // u8x8.drawString(0,0,"012345678901234567890123456789");
+  // u8x8.setInverseFont(0);
+  // display.clearDisplay();
+
   // int maxRadius = min(display.width(), display.height());
- 
-  // int r0 = map(reads[0], 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r1 = map(reads[1], 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r2 = map(reads[2], 0, MAX_ANALOG_INPUT, 0, maxRadius);
-  // int r3 = map(reads[3], 0, MAX_ANALOG_INPUT, 0, maxRadius);
+
+  // int r0 = random(maxRadius);
+  // int r1 = random(maxRadius);
+  // int r2 = random(maxRadius);
+  // int r3 = random(maxRadius);
  
   // int x0 = 10;
   // int y0 = display.height() / 2;
@@ -379,17 +402,17 @@ bool updateScreen(void*) {
   // display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
 
   // show message
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK);
-  for(int i = 0; i < 4; i++){
-    display.setCursor(64, 10+i*10);
-    display.println(reads[i]);
-  }
-  display.println(screenMessage);
+  // display.setTextSize(1);
+  // display.setTextColor(WHITE, BLACK);
+  // for(int i = 0; i < 4; i++){
+  //   display.setCursor(64, 10+i*10);
+  //   display.println(reads[i]);
+  // }
+  // display.println(screenMessage);
 
-  display.display(); 
+  // display.display(); 
+  Serial.println("display done");
 
-  return true;
 }
 
 

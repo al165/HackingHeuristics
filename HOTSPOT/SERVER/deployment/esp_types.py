@@ -37,6 +37,7 @@ class Agent:
     output_vectors: deque = field(
         default=deque(maxlen=8), metadata=config(encoder=list)
     )
+    last_output: dict = {},
     last_ping_time: float = field(default=time())
 
     def __post_init__(self):

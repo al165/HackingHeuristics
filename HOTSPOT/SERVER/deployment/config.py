@@ -13,9 +13,9 @@ MCAST_PORT = 10000
 # ESP and their stations
 #         MAC ADDRESS  : (station, id, type)
 STATIONS = {
-    "EC:62:60:9C:C0:A4": (1, 1, ESP.HEADSET),   # HEADSET 0
-    "24:D7:EB:15:19:34": (1, 7, ESP.BLOB),      # BLOB 0
-    "94:E6:86:03:A3:C4": (1, 1, ESP.HEADSET),   # HEADSET 1
+    "EC:62:60:9C:C0:A4": (0, 0, ESP.HEADSET),   # HEADSET 0
+    "24:D7:EB:15:19:34": (0, 6, ESP.BLOB),      # BLOB 0
+    "40:22:D8:7A:27:D8": (1, 1, ESP.HEADSET),   # HEADSET 1
     "24:D7:EB:15:18:00": (1, 7, ESP.BLOB),      # BLOB 1
     "A0:B7:65:DD:FB:D4": (2, 2, ESP.HEADSET),   # HEADSET 2
     "40:22:D8:7A:33:10": (2, 8, ESP.BLOB),      # BLOB 2
@@ -23,11 +23,12 @@ STATIONS = {
     "A4:CF:12:97:1D:2C": (3, 9, ESP.BLOB),      # BLOB 3
     "C0:49:EF:E4:60:BC": (4, 4, ESP.HEADSET),   # HEADSET 4
     "24:6F:28:A5:08:DC": (4, 10, ESP.BLOB),     # BLOB 4
-    "40:22:D8:7A:27:D8": (5, 5, ESP.HEADSET),   # HEADSET 5
+    "94:E6:86:03:A3:C4": (5, 5, ESP.HEADSET),   # HEADSET 5
     "24:6F:28:83:66:50": (5, 11, ESP.BLOB),     # BLOB 5
-    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13       # TESTING ESP
-    "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
-    "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
+    "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
+    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13         # TESTING ESP
+    # "A0:B7:65:DD:FB:D4": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
+    # "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
 }
 ########################
 

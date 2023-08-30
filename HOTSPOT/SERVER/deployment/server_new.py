@@ -182,7 +182,7 @@ def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}):
         else:
             try:
                 json_data = json.loads(data.decode('ascii'))
-                print(json_data)
+                # print(json_data)
             except json.decoder.JSONDecodeError:
                 print("error parsing", data.decode('ascii'))
 
@@ -284,6 +284,7 @@ def main():
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "features"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "output"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "agent_positions"},), seconds=2)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "save_state"},), seconds=0.5)
 
     translator = Translator(
         server_q,

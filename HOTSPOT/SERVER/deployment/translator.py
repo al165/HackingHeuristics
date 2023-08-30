@@ -191,16 +191,19 @@ class Translator(multiprocessing.Process):
 
         for _, agent in self.agents.items():
             if agent.esp_type in (ESP.BLOB, ESP.ESP13):
+                agent.last_output = {}
                 continue
 
             if not agent.active:
                 # print(f"agent {agent.id} inactive, skipping output")
+                agent.last_output = {}
                 continue
 
             parameters = dict()
             try:
                 y = agent.output_vectors[-1]
             except (IndexError, KeyError):
+                agent.last_output = {}
                 continue
 
             for i, name in enumerate(OUTPUT_VECTOR):
@@ -218,6 +221,7 @@ class Translator(multiprocessing.Process):
                     parameters[name.lower()] = out
 
             data[str(agent.station)] = parameters
+            agent.last_output = parameters
 
         if len(data) > 0:
             self.broadcast(data)
@@ -266,7 +270,27 @@ class Translator(multiprocessing.Process):
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
                 writer.writeheader()
 
-    def check_messages(self):
+    def saveState(self):
+        state = dict()
+
+        for host, agent in self.agents.items():
+            id_ = agent.id
+            
+            state[id_] = {
+                "esp_type": agent.esp_type.name,
+                "active": agent.active,
+                "station": agent.station,
+                "port": agent.port,
+                "mac": agent.mac,
+                # "pos": list(agent.map[-1].astype(float)),
+                "last_output": agent.last_output,
+                "highlight": agent.highlight,
+            }
+
+        with open("./state.json", "w") as f:
+            json.dump(state, f, sort_keys=True, indent=4)
+
+    def checkMessages(self):
         while True:
             try:
                 (host, port), msg = self.msg_q.get(block=False)
@@ -313,6 +337,9 @@ class Translator(multiprocessing.Process):
                 total = self.updateObservers(msg)
                 data = dict(ESP13={"type": "observer_count", "observer_count": total})
                 self.broadcast(data)
+
+            elif msg_type == "save_state":
+                self.saveState()
 
             else:
                 print(f"Unknown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
@@ -462,7 +489,7 @@ class Translator(multiprocessing.Process):
 
     def run(self):
         while True:
-            self.check_messages()
+            self.checkMessages()
             self.updatePlotQueue() 
 
             if self.stop_event.is_set():
