@@ -36,8 +36,8 @@ char mac[18];
 const int VALVE_PINS[] = {26, 16, 17, 18, 19, 23};
 // 0: off and avaliable, 1: off and deflating 2: on
 bool valveState[] = {0, 0, 0, 0, 0, 0};
-int valveTimes[] = {0, 0, 0, 0, 0, 0};
-float valveProbabilities[] = {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+// int valveTimes[] = {0, 0, 0, 0, 0, 0};
+float valveProbabilities[] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 float probOffset = 0.05;
 
 
@@ -48,6 +48,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 Timer<12> timer;
 Timer<> blink_timer;
+Timer<> breath_timer;
 
 bool ping(void *){
   blink();
@@ -59,6 +60,23 @@ void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
   blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
+}
+
+bool breathe(void* station){
+  if(random(10000)/10000 < probOffset){
+    int i = random(6);
+    turnValveOn((void*) i);
+  }
+  breath_timer.in(1000 + random(5000), breathe);
+  return true;
+}
+
+bool turnValveOn(void* station){
+  digitalWrite(VALVE_PINS[(int)station], HIGH);
+  valveState[(int)station] = 2;
+  timer.in(500, turnValveOff, station);
+
+  return true;
 }
 
 bool turnValveOff(void* station){
@@ -87,9 +105,9 @@ void parsePacket(AsyncUDPPacket packet){
     return;
   }
 
-  if(doc.containsKey("movement")){
-    Serial.println((float)doc["movement"]);
-    float movement = doc["movement"];
+  if(doc.containsKey("camera_result")){
+    Serial.println((float)doc["camera_result"]);
+    float movement = doc["camera_result"]["movement"];
     probOffset = map(movement, 2, 80, 0.10, 0.01, true);
     Serial.print("probOffset set to ");
     Serial.println(probOffset);
@@ -104,11 +122,27 @@ void parsePacket(AsyncUDPPacket packet){
 
     if(p < prob){
       Serial.printf("valve %s activated\n", name);
-      digitalWrite(VALVE_PINS[station], HIGH);
-      valveState[station] = 2;
-      timer.in(500, turnValveOff, (void *)station);
+      turnValveOn((void*)station);
     }
 
+  }
+
+  if(doc.containsKey("ESP13")){
+    int observer_count = doc["ESP13"]["observer_count"].as<int>();
+    Serial.print("observer_count ");
+    Serial.println(observer_count);
+  }
+
+  for(int i=0; i<6; i++){
+    char name[2];
+    snprintf(name, 2, "%u", i);
+
+    if(!doc.containsKey(name)){
+      continue;
+    }
+
+    int observers = doc[name]["touch_count"];
+    valveProbabilities[i] = 0.5*observers;
   }
 
 }
@@ -166,12 +200,14 @@ void setup() {
   Serial.println(mac);
   
   timer.every(10000, ping);
+  breath_timer.in(5000, breathe);
   ping(0);
 }
 
 void loop() {
   timer.tick();
   blink_timer.tick();
+  breath_timer.tick();
 }
 
 void getMac() {
