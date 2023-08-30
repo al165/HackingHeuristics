@@ -331,7 +331,7 @@ class Translator(multiprocessing.Process):
 
             elif msg_type == "touch_count":
                 data = dict()
-                date[msg["station"]] = msg
+                data[msg["station"]] = msg
                 self.broadcast(data)
 
                 total = self.updateObservers(msg)
@@ -379,7 +379,9 @@ class Translator(multiprocessing.Process):
 
     def updateObservers(self, msg):
         self.observers[msg["station"]] = msg["touch_count"]
-        return sum([x for x in self.observers.values()])
+        total = sum([x for x in self.observers.values()])
+        print(total)
+        return total
 
     def getFeatures(self):
         target = self.getCenter()
@@ -452,10 +454,16 @@ class Translator(multiprocessing.Process):
             agent.highlight = False
 
         active_agents = self.getActiveAgents(filter_type=(ESP.BLOB, ESP.ESP13))
-        for i in range(len(active_agents) - 1):
-            map1 = active_agents[i].map[-1]
-            for j in range(i+1, len(active_agents)):
-                map2 = active_agents[j].map[-1]
+        agents = list(active_agents.keys())
+        if len(agents) < 2:
+            return
+
+        for i in range(len(agents) - 1):
+            host1 = agents[i]
+            map1 = active_agents[host1].map[-1]
+            for j in range(i+1, len(agents)):
+                host2 = agents[j]
+                map2 = active_agents[host2].map[-1]
 
                 dist = np.linalg.norm(map2 - map1)
                 if dist < threshold:

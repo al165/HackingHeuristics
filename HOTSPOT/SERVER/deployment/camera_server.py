@@ -121,6 +121,8 @@ class CameraServer(Thread):
             return
 
         move = np.square(np.subtract(self.im_lores, self._prev)).mean()
+        move /= 90
+        move = min(move, 1.0)
         self._prev_movement = np.roll(self._prev_movement, 1)
         self._prev_movement[0] = move
         self.movement = np.mean(self._prev_movement)
@@ -140,6 +142,7 @@ class CameraServer(Thread):
             if msg_type == "movement":
                 if not PICAM_AVAILIABLE:
                     continue
+                #print(f"movement: {self.movement}")
                 data = {"type": "movement", "movement": self.movement}
                 self.broadcast(data)
 
