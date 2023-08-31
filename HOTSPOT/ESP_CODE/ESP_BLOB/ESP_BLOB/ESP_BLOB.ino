@@ -19,6 +19,7 @@
 #define LED_BUILTIN 16
 #endif
 
+// #include <WifiClient.h>
 #include <WiFiManager.h>
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
@@ -38,8 +39,12 @@ NoiselessTouchESP32 touchsensor1(TOUCH_PIN[0], TOUCH_HISTORY_LEN, TOUCH_HYSTERES
 NoiselessTouchESP32 touchsensor2(TOUCH_PIN[1], TOUCH_HISTORY_LEN, TOUCH_HYSTERESIS);
 NoiselessTouchESP32 touchsensor[2] = {touchsensor1,touchsensor2}; 
 
+WiFiClient client;
 WiFiManager wm;
 AsyncUDP udp;
+
+IPAddress host;
+int port = 0;
 
 IPAddress MCAST_GRP(224,3,29,71);
 const int UDP_PORT = 10000;
@@ -53,7 +58,7 @@ int rampVals = 0;
 int targetVals = 0;
 
 // timer to simplify scheduling events
-Timer<4> timer;
+Timer<8> timer;
 
 #define MAX_AIR_TIME 8
 #define AIR_ON_WAIT 5
@@ -65,8 +70,25 @@ bool valveState = 0;
 Timer<> blink_timer;
 
 
+bool checkConnection(void *){
+  if (!client.connected() && port != 0){
+    client.connect(host, port);
+  }
+
+  return true;
+}
+
 bool ping(void *){
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+  // udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+  // udp.print("{\"server\":{\"type\": \"whoami\"}}");
+
+  if(client.connected()){
+    client.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+    if(station[0] == 0){
+      client.print("{\"server\":{\"type\": \"whoami\"}}");
+    }
+  }
+
   blink();
   return true;
 }
@@ -95,10 +117,21 @@ void parsePacket(AsyncUDPPacket packet){
     JsonObject details = doc[mac];
     if(details.containsKey("station")){
       itoa(details["station"], station, 10);
+      Serial.print("station set to ");
+      Serial.println(station);
     }
   }
 
-  if(!doc.containsKey(station)){
+  if(doc.containsKey("all")){
+    if(doc["all"]["type"] == "lighthouse"){
+      Serial.println("lighthouse");
+      host = packet.remoteIP();
+      port = doc["all"]["tcp_port"];
+      // connect();
+    }
+  }
+
+  if(!doc.containsKey(station) || station[0] == 0){
     return;
   }
 
@@ -197,11 +230,15 @@ bool updateTouch(void*){
   if(count != touchCount){
     Serial.print("count ");
     Serial.println(count);
-    Serial.print("touchCount ");
-    Serial.println(touchCount);
 
     touchCount = count;
-    udp.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
+
+    if(client.connected()){
+      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", touchCount, station);
+      Serial.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", touchCount, station);
+    }
+
+    // udp.printf("{\"%s\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", station, touchCount, station);
   }
   return true;
 }
@@ -244,12 +281,13 @@ void setup() {
   Serial.print("** MAC: ");
   Serial.println(mac);
 
-  timer.every(10000, ping);
+  timer.every(5000, ping);
+  timer.every(1000, checkConnection);
   timer.every(RAMP_TIME, updateRamp);
-  timer.every(100, updateTouch);
+  timer.every(1000, updateTouch);
   ping(0);
 
-  udp.print("{\"server\":{\"type\": \"whoami\"}}");
+  // udp.print("{\"server\":{\"type\": \"whoami\"}}");
 }
 
 void loop() {

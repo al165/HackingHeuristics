@@ -15,32 +15,38 @@
         .boolean { color: blue; font-weight: bold; }
         .null { color: magenta; }
         .key { color: black; }
+        #error {
+            color: red;
+            background-color: antiquewhite;
+        }
     </style>
 </head>
 <body>
+    <span id="error"></span>
     <span id="time"></span>
-    <pre id="result"></pre>
+    <pre id="result">
+{
+    live data will appear here
+}</pre>
     <script>
 
 
-getStatus()
-
 function getStatus(){
-    // console.log("getStatus");
     fetch("http://localhost:8080/status").then((res) => {
         return res.json();
     }).then((json_data) => {
         data = JSON.stringify(json_data, undefined, 2);
         htm = syntaxHighlight(data);
         document.querySelector("#result").innerHTML = htm;
-
         let date = new Date();
         document.querySelector("#time").innerText = date.toJSON();
+        document.querySelector("#error").innerText = "";
         setTimeout(getStatus, 200);
     }).catch((err) => {
         console.log(err)
         let date = new Date();
         document.querySelector("#time").innerText = date.toJSON();
+        document.querySelector("#error").innerText = err;
         setTimeout(getStatus, 200);
     });
 }
@@ -63,6 +69,11 @@ function syntaxHighlight(json) {
         return '<span class="' + cls + '">' + match + '</span>';
     });
 }
+
+
+getStatus();
+
+
     </script>
 </body>
 </html>

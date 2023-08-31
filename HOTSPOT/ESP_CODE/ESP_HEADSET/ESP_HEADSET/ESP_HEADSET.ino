@@ -54,6 +54,7 @@ const int MAX_ANALOG_INPUT = 1023;
 
 #include <WiFiClient.h>
 #include <WiFiManager.h>
+// #include <WiFiUdp.h>
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
@@ -80,7 +81,10 @@ AsyncUDP udp;
 
 WiFiClient client;
 IPAddress host(192, 168, 2, 9);
-int port = 8080;
+int port = 0;
+
+WiFiClient tcpClient;
+int tcp_port = 0;
 
 char SERVER_URL[80];
 bool connected = false;
@@ -116,9 +120,29 @@ Timer<12> timer;
 Timer<> blink_timer;
 
 
+bool checkConnection(void *){
+  if (!tcpClient.connected() && tcp_port != 0){
+    tcpClient.connect(host, tcp_port);
+  }
+
+  return true;
+}
+
 bool ping(void *){
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
-  blink();
+  // udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+  // if(direct_port != 0){
+  //   udpDirect.beginPacket(host, direct_port);
+  //   udpDirect.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+  //   udpDirect.endPacket();
+  //   blink();
+  // }
+
+  if(tcpClient.connected()){
+    tcpClient.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+    if(station[0] == 0){
+      tcpClient.print("{\"server\":{\"type\": \"whoami\"}}");
+    }
+  }
   return true;
 }
 
@@ -144,7 +168,6 @@ bool pulse(void *){
   return true;
 }
 
-
 bool readPins(void *){
   static int data_ptr = 0;
   static int avg_active = 0;
@@ -166,7 +189,7 @@ bool readPins(void *){
 
   if(data_ptr >= DATA_LENGTH) {
     active = (float) avg_active / DATA_LENGTH > 8.0;
-    if(active) Serial.println("active");
+    // if(active) Serial.println("active");
 
     data_ptr = 0;
     avg_active = 0;
@@ -233,7 +256,7 @@ void parsePacket(AsyncUDPPacket packet){
   auto data = packet.data();
   blink();
 
-  DynamicJsonDocument doc(2048);
+  DynamicJsonDocument doc(4096);
   DeserializationError error = deserializeJson(doc, data);
 
   if(error){
@@ -243,9 +266,10 @@ void parsePacket(AsyncUDPPacket packet){
 
   if(doc.containsKey("all")){
     if(doc["all"]["type"] == "lighthouse"){
-      Serial.println("lighthouse");
+      // Serial.println("lighthouse");
       host = packet.remoteIP();
       port = doc["all"]["port"];
+      tcp_port = doc["all"]["tcp_port"];
       connect();
     }
   }
@@ -258,7 +282,6 @@ void parsePacket(AsyncUDPPacket packet){
   }
 
   if(!doc.containsKey(station)){
-    // Serial.println("done");
     return;
   }
 
@@ -275,6 +298,9 @@ void parsePacket(AsyncUDPPacket packet){
 
   if(parameters.containsKey("touch_count")){
     int val = parameters["touch_count"].as<int>();
+    Serial.print("touch_count: ");
+    Serial.println(val);
+
     if(val > 0){
       Serial.println("turning on temps");
 
@@ -354,11 +380,8 @@ void setup() {
   Serial.println(mac);
   Serial.println("**********");
 
-  // snprintf(screenMessage, sizeof(screenMessage), "* MAC %s *", mac);
-  // screenMessage = "* MAC " + mac + " *";
-  // timer.in(4000, [](void*) -> bool {screenMessage[0] = 0; return true;});
-
   timer.every(2000, ping);
+  timer.every(1000, checkConnection);
   timer.every(1000/SAMPLE_RATE, readPins);
   // timer.every(200, updateScreen);
 
@@ -414,7 +437,6 @@ void updateScreen() {
 
 }
 
-
 void getMac() {
   byte baseMac[6];
   WiFi.macAddress(baseMac);
@@ -427,7 +449,7 @@ void getMac() {
 }
 
 void connect(){
-  if(connected){
+  if(connected || port == 0){
     return;
   }
   snprintf(
@@ -443,5 +465,12 @@ void connect(){
   connected = true;
   Serial.println("connected");
   Serial.println(SERVER_URL);
-  udp.println("{\"server\":{\"type\": \"whoami\"}}");
+  // udp.print("{\"server\":{\"type\": \"whoami\"}}");
+  // Serial.print("beginPacket ");
+  // Serial.println(direct_port);
+  // delay(10);
+  // udpDirect.beginPacket(host, direct_port);
+  // udpDirect.print("{\"server\":{\"type\": \"whoami\"}}");
+  // udpDirect.endPacket();
+
 }

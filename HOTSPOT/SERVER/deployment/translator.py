@@ -245,6 +245,7 @@ class Translator(multiprocessing.Process):
 
         json_data = json.dumps(data)
         sent = self.mcast_socket.sendto(bytes(json_data, 'ascii'), (MCAST_GRP, MCAST_PORT))
+        self.state_d["last_server_broadcast"] = json_data
 
     def create_agent(self, mac: str, host: str, port: int):
         """New agent connected"""
@@ -421,7 +422,7 @@ class Translator(multiprocessing.Process):
     def updateObservers(self, msg):
         self.observers[msg["station"]] = msg["touch_count"]
         total = sum([x for x in self.observers.values()])
-        print(total)
+        self.state_d["observers"] = self.observers
         return total
 
     def getFeatures(self):

@@ -3,7 +3,7 @@ from esp_types import ESP
 # This servers details
 HOST = ''
 PORT = 8080
-
+TCP_PORT = 8081
 
 # Multicast
 MCAST_GRP = '224.3.29.71'
@@ -26,9 +26,9 @@ STATIONS = {
     "94:E6:86:03:A3:C4": (5, 5, ESP.HEADSET),   # HEADSET 5
     "24:6F:28:83:66:50": (5, 11, ESP.BLOB),     # BLOB 5
     "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
-    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13         # TESTING ESP
+    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13       # TESTING ESP
     "C4:4F:33:65:DA:79": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
-    # "24:D7:EB:15:18:00": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
+    "30:AE:A4:F3:48:94": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
 }
 ########################
 
