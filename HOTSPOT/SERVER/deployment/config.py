@@ -23,7 +23,7 @@ STATIONS = {
     "A4:CF:12:97:1D:2C": (3, 9, ESP.BLOB),      # BLOB 3
     "C0:49:EF:E4:60:BC": (4, 4, ESP.HEADSET),   # HEADSET 4
     "24:6F:28:A5:08:DC": (4, 10, ESP.BLOB),     # BLOB 4
-    "94:E6:86:03:A3:C4": (5, 5, ESP.HEADSET),   # HEADSET 5
+    "FC:F5:C4:0F:BE:6C": (5, 5, ESP.HEADSET),   # HEADSET 5
     "24:6F:28:83:66:50": (5, 11, ESP.BLOB),     # BLOB 5
     "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
     "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13       # TESTING ESP
