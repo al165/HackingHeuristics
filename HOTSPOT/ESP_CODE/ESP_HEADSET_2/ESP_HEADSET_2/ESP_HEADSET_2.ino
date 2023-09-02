@@ -54,13 +54,19 @@ const int MAX_ANALOG_INPUT = 1023;
 
 #include <WiFiClient.h>
 #include <WiFiManager.h>
-// #include <WiFiUdp.h>
 #define ARDUINOJSON_DECODE_UNICODE 0
 #include <ArduinoJson.h>
 #include <arduino-timer.h>
 #include <Filters.h>
 #include <Filters/IIRFilter.hpp>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 WiFiManager wm;
 AsyncUDP udp;
@@ -122,11 +128,13 @@ SensorFeatures sensorFeatures;
 const long TEMP_ON = 5000;
 
 // timer to simplify scheduling events
-Timer<4, micros> timer;
+Timer<4> timer;
 Timer<> blink_timer;
+Timer<1, micros> sensor_timer;
+Timer<> temp_timer;
 
-const int json_capacity = 10 * JSON_OBJECT_SIZE(1)  + JSON_OBJECT_SIZE(1);
-
+//                              10 Features         +      2 Meta
+const int json_capacity = 10 * JSON_OBJECT_SIZE(1)  + 2 * JSON_OBJECT_SIZE(1);
 
 
 bool checkConnection(void *){
@@ -139,18 +147,20 @@ bool checkConnection(void *){
 
 bool ping(void *){
   if(tcpClient.connected()){
-    tcpClient.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+    // Serial.println("ping");
+    tcpClient.printf("{\"server\":{\"type\":\"ping\",\"mac\":\"%s\"}}\n", mac);
     if(station[0] == 0){
-      tcpClient.print("{\"server\":{\"type\": \"whoami\"}}");
+      tcpClient.println("{\"server\":{\"type\":\"whoami\"}}");
     }
+    blink();
   }
   return true;
 }
 
 void blink(){
-  blink_timer.cancel();
+  // blink_timer.cancel();
   digitalWrite(LED_BLINK, HIGH);
-  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BLINK, LOW);return true;} );
+  blink_timer.in(100, [](void*) -> bool {digitalWrite(LED_BLINK, LOW);return false;} );
 }
 
 void getStats(float *data, int dataLength, float *mean, float *std){
@@ -201,9 +211,10 @@ bool getFeatures(void *) {
   getActivity(sensorData.eog, DATA_LENGTH_SAMPLES, eog_mean, 0.4, &sensorFeatures.eog_activity);
   if(sensorFeatures.gsr_mean > 0.0){
     sensorFeatures.active = true;
+  } else {
+    sensorFeatures.active = false;
   }
 
-  // printFeatures();
   sendFeatures();
   return true;
 }
@@ -245,12 +256,6 @@ bool readInput(void *){
 
   sample_ptr = (sample_ptr + 1) % DATA_LENGTH_SAMPLES;
 
-  // if(sample_ptr == 0){
-  //   getFeatures();
-  //   printFeatures();
-  // }
-
-  // timer.in(sampleTime, readInput);
   return true;
 }
 
@@ -270,30 +275,38 @@ void printFeatures(){
 }
 
 void sendFeatures(){
-  // if(!tcpClient.connected()){
-  //   return;
-  // }
+  if(!tcpClient.connected()){
+    return;
+  }
 
   DynamicJsonDocument doc(json_capacity);
   JsonObject server = doc.createNestedObject("server");
   server["active"] = sensorFeatures.active;
-  server["eeg_mean"] = sensorFeatures.eeg_mean;
-  server["eeg_std"] = sensorFeatures.eeg_std;
-  server["eeg_delta"] = sensorFeatures.eeg_delta;
-  server["eog_activity"] = sensorFeatures.eog_activity;
-  server["gsr_mean"] = sensorFeatures.gsr_mean;
-  server["gsr_std"] = sensorFeatures.gsr_std;
-  server["gsr_delta"] = sensorFeatures.gsr_delta;
-  server["hrt_mean"] = sensorFeatures.hrt_mean;
-  server["hrt_std"] = sensorFeatures.hrt_std;
+  server["EEG:mean"] = sensorFeatures.eeg_mean;
+  server["EEG:std"] = sensorFeatures.eeg_std;
+  server["EEG:delta"] = sensorFeatures.eeg_delta;
+  server["EOG:all_rate"] = sensorFeatures.eog_activity;
+  server["GSR:mean"] = sensorFeatures.gsr_mean;
+  server["GSR:std"] = sensorFeatures.gsr_std;
+  server["GSR:delta"] = sensorFeatures.gsr_delta;
+  server["heart:mean"] = sensorFeatures.hrt_mean;
+  server["heart:std"] = sensorFeatures.hrt_std;
+  server["type"] = "sensor_features";
+
+  if(doc.overflowed()){
+    Serial.print("doc overflowed, expand capacity?");
+  }
 
   char output[512];
   serializeJson(doc, output);
   Serial.println(output);
+
+  tcpClient.println(output);
+  blink();
 }
 
-
 bool turnTempsOff(void *){
+  Serial.println("Turning OFF temps");
   digitalWrite(AIN2, LOW);
   digitalWrite(AIN1, LOW);
   digitalWrite(BIN2, LOW);
@@ -317,9 +330,12 @@ void parsePacket(AsyncUDPPacket packet){
 
   if(doc.containsKey("all")){
     if(doc["all"]["type"] == "lighthouse"){
-      // Serial.println("lighthouse");
-      host = packet.remoteIP();
-      tcp_port = doc["all"]["tcp_port"];
+      if(!tcpClient.connected()){
+        Serial.println("lighthouse");
+        host = packet.remoteIP();
+        tcp_port = doc["all"]["tcp_port"];
+        Serial.printf("%u.%u.%u.%u host, %u tcp_port\n", host[0], host[1], host[2], host[3], tcp_port);
+      }
     }
   }
 
@@ -327,6 +343,7 @@ void parsePacket(AsyncUDPPacket packet){
     JsonObject details = doc[mac];
     if(details.containsKey("station")){
       itoa(details["station"], station, 10);
+      Serial.printf("Station set to %s\n", station);
     }
   }
 
@@ -340,15 +357,16 @@ void parsePacket(AsyncUDPPacket packet){
   if(parameters.containsKey("highlight")){
     if(parameters["highlight"]){
       digitalWrite(IND1, HIGH);
+      Serial.println("HIGHLIGHT ON");
     } else {
       digitalWrite(IND1, LOW);
+      Serial.println("HIGHLIGHT OFF");
     }
   }
 
   if(parameters.containsKey("touch_count")){
     int val = parameters["touch_count"].as<int>();
-    Serial.print("touch_count: ");
-    Serial.println(val);
+    Serial.printf("touch_count: %u\n", val);
 
     if(val > 0){
       Serial.println("turning on temps");
@@ -364,12 +382,11 @@ void parsePacket(AsyncUDPPacket packet){
         digitalWrite(BIN2, HIGH);
         digitalWrite(BIN1, LOW);
       }
-      timer.in(TEMP_ON, turnTempsOff);
+      temp_timer.in(TEMP_ON, turnTempsOff);
     } else {
       turnTempsOff(0);
     }
   }
-  // Serial.println("done");
 
   return;
 }
@@ -392,13 +409,11 @@ void setup() {
   digitalWrite(BIN1, LOW);
   digitalWrite(BIN2, LOW);
 
-  // u8x8.begin();
-  // u8x8.setPowerSave(0);
-
-  // if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-  //   Serial.println(F("SSD1306 allocation failed"));
-  //   for(;;);
-  // }
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {   // <<<<<< SHOULD BE 0x3D for 128x64 displays???
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
 
 #if defined(ESP32)
   WiFi.mode(WIFI_MODE_STA);
@@ -429,22 +444,23 @@ void setup() {
   Serial.println(mac);
   Serial.println("**********");
 
-  timer.every(2000000, ping);
-  timer.every(2000000, checkConnection);
-  timer.every(sampleTime, readInput);
-  timer.every(2000000, getFeatures);
+  sensor_timer.every(sampleTime, readInput);
+  timer.every(4000, ping);
+  timer.every(2000, checkConnection);
+  timer.every(2000, getFeatures);
 
-  ping(0);
-
+  delay(100);
 }
 
 void loop() {
   timer.tick();
   blink_timer.tick();
+  sensor_timer.tick();
+  temp_timer.tick();
 }
 
 void updateScreen() {
-  Serial.println("updateScreen");
+  // Serial.println("updateScreen");
   // u8x8.setFont(u8x8_font_chroma48medium8_r);
   // u8x8.drawString(0,1,"Hello World!");
   // u8x8.setInverseFont(1);
@@ -472,16 +488,23 @@ void updateScreen() {
   // display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
 
   // show message
-  // display.setTextSize(1);
-  // display.setTextColor(WHITE, BLACK);
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+  display.printf(
+    "%f.3f\n%f.3f\n%f.3f\n%f.3f", 
+    sensorData.eeg[0],
+    sensorData.eog[0],
+    sensorData.gsr[0],
+    sensorData.hrt[0]
+  );
   // for(int i = 0; i < 4; i++){
   //   display.setCursor(64, 10+i*10);
   //   display.println(reads[i]);
   // }
   // display.println(screenMessage);
 
-  // display.display(); 
-  Serial.println("display done");
+  display.display(); 
+  // Serial.println("display done");
 
 }
 

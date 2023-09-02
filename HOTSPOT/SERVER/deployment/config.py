@@ -26,11 +26,21 @@ STATIONS = {
     "FC:F5:C4:0F:BE:6C": (5, 5, ESP.HEADSET),   # HEADSET 5
     "24:6F:28:83:66:50": (5, 11, ESP.BLOB),     # BLOB 5
     "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
-    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # ESP13       # TESTING ESP
-    "C4:4F:33:65:DA:79": (0, 0, ESP.HEADSET),   # HEADSET 0   # TESTING ESP
-    "30:AE:A4:F3:48:94": (0, 6, ESP.BLOB),      # BLOB 0      # TESTING ESP
+    "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # TESTING ESP
+    "C4:4F:33:65:DA:79": (13, 13, ESP.ESP13),   # TESTING ESP
+    "30:AE:A4:F3:48:94": (1, 2, ESP.BLOB),   # TESTING ESP
+    "3C:71:BF:58:FA:A8": (1, 1, ESP.HEADSET),   # TESTING ESP
 }
 ########################
+
+BLOB_NS_ADDRS = {
+    0: 0x1A,
+    1: 0x1B,
+    2: 0x1C,
+    3: 0x1D,
+    4: 0x1E,
+    5: 0x1F,
+}
 
 
 # Save directory to store data traces
@@ -71,8 +81,8 @@ FEATURE_VECTOR_MAP = [
     "EEG:mean",
     "EEG:delta",
     "EOG:all_rate",
-    "EOG:p_rate",
-    "EOG:n_rate",
+    # "EOG:p_rate",
+    # "EOG:n_rate",
     "GSR:mean",
     "GSR:delta",
     "heart:std",

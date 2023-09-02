@@ -3,8 +3,10 @@ import csv
 import json
 import socket
 import threading
+import dataclasses
 import multiprocessing
 from queue import Empty
+from warnings import warn
 from time import time, sleep
 from datetime import datetime
 from collections import deque
@@ -19,6 +21,7 @@ from networks import LinearNetwork, VAENetwork, SACModel
 
 
 from config import (
+    BLOB_NS_ADDRS,
     STATIONS,
     TRACE_DIR,
     UPDATE_TIME,
@@ -150,7 +153,6 @@ class Translator(multiprocessing.Process):
         a = np.concatenate([z, self.getCenter()])
         self.translator.get_action(a, False)
 
-
     def getActiveAgents(self, filter_type: Tuple[ESP] = ()) -> Dict[str, Agent]:
         active = dict()
 
@@ -263,7 +265,6 @@ class Translator(multiprocessing.Process):
             mac=mac,
             station=station,
             esp_type=esp_type,
-            last_ping_time=time(),
         )
         
         self.connections[id_] = (mac, host, port)
@@ -289,16 +290,7 @@ class Translator(multiprocessing.Process):
         for host, agent in self.agents.items():
             id_ = agent.id
             
-            esp_state[id_] = {
-                "esp_type": agent.esp_type.name,
-                "active": agent.active,
-                "station": agent.station,
-                "port": agent.port,
-                "mac": agent.mac,
-                # "pos": list(agent.map[-1].astype(float)),
-                "last_output": agent.last_output,
-                "highlight": agent.highlight,
-            }
+            esp_state[id_] = agent.getSummary()
 
         self.state_d["ESPS"] = esp_state
 
@@ -318,28 +310,36 @@ class Translator(multiprocessing.Process):
 
             msg_type = msg.get("type", "unknown")
 
-            if msg_type != "update_state":
+            if msg_type not in ["ping", "update_state"]:
                 self.state_d["last_server_msg"] = msg
 
             if msg_type == "ping":
                 self.handlePingMessage(msg, host, port)
  
-            elif msg_type == "sensor":
-                self.handleSensorMessage(msg, host, port)
-                self.updated = True
+            # elif msg_type == "sensor":
+            #     self.handleSensorMessage(msg, host, port)
+            #     self.updated = True
 
-            elif msg_type == "raw_sensor":
-                self.processRawData(msg, host, port)
+            # elif msg_type == "raw_sensor":
+            #     self.processRawData(msg, host, port)
+
+            elif msg_type == "sensor_features":
+                self.updateFeatures(msg, host, port)
 
             elif msg_type == "whoami":
                 if host not in self.agents:
-                    print("'whoami' from unregisterwed host ", host)
+                    print("'whoami' from unregistered host ", host)
                     continue
                 mac = self.agents[host].mac
                 id_ = self.agents[host].id
                 station = self.agents[host].station
                 data = dict()
                 data[mac] = {"type": "whoami", "station": station, "id": id_,}
+                if self.agents[host].esp_type == ESP.BLOB:
+                    i2c = BLOB_NS_ADDRS.get(station, 0x1A)
+                    data[mac]["i2c"] = i2c
+                    self.agents[host].i2c = i2c
+
                 self.broadcast(data)
 
             elif msg_type == "checkpoint":
@@ -349,6 +349,7 @@ class Translator(multiprocessing.Process):
                 self.getFeatures()
 
             elif msg_type == "output":
+                self.getFeatures()
                 self.output()
 
             elif msg_type == "agent_positions":
@@ -357,11 +358,12 @@ class Translator(multiprocessing.Process):
             elif msg_type == "touch_count":
                 data = dict()
                 data[msg["station"]] = msg
+                total = self.updateObservers(msg)
+                data["ESP13"] = {"type": "observer_count", "observer_count": total}
                 self.broadcast(data)
 
-                total = self.updateObservers(msg)
-                data = dict(ESP13={"type": "observer_count", "observer_count": total})
-                self.broadcast(data)
+                if host in self.agents:
+                    self.agents[host].touch_count = msg["touch_count"]
 
             elif msg_type == "save_state":
                 self.saveState()
@@ -373,6 +375,15 @@ class Translator(multiprocessing.Process):
                 print(f"Unknown message from {host}, MAC {self.agents.get(host, 'unregistered')}")
 
 
+    def updateFeatures(self, msg, host, port):
+        if host not in self.agents:
+            print(f"ESP with IP {host} needs to ping server their MAC first")
+            return
+
+        self.agents[host].sensor_features = msg
+        if "active" in msg:
+            self.agents[host].active = msg["active"]
+
     def handlePingMessage(self, msg, host, port):
         if host not in self.agents:
             mac = msg["mac"]
@@ -382,6 +393,7 @@ class Translator(multiprocessing.Process):
         self.agents[host].last_ping_time = time()
 
     def processRawData(self, msg, host, port):
+        warn("data prcessed by ESPs", DeprecationWarning, stacklevel=2)
         values = dict(msg)
         for dk, v in msg.items():
             try:
@@ -429,16 +441,18 @@ class Translator(multiprocessing.Process):
         target = self.getCenter()
 
         for host, agent in self.getActiveAgents(filter_type=(ESP.BLOB, ESP.ESP13)).items():
-            features = dict()
-            try:
-                for name in DATA_NAME_MAP.values():
-                    buffer = agent.sensor_data[name]
-                    result = feature_extractors[name](buffer)
-                    for k, v in result.items():
-                        f_name = name + ":" + k
-                        features[f_name] = v
-            except KeyError:
-                continue
+            # features = dict()
+            # try:
+            #     for name in DATA_NAME_MAP.values():
+            #         buffer = agent.sensor_data[name]
+            #         result = feature_extractors[name](buffer)
+            #         for k, v in result.items():
+            #             f_name = name + ":" + k
+            #             features[f_name] = v
+            # except KeyError:
+            #     continue
+
+            features = agent.sensor_features;
 
             # EMBED SENSORS
             x = self.makeFeatureVector(features)
@@ -509,8 +523,8 @@ class Translator(multiprocessing.Process):
 
                 dist = np.linalg.norm(map2 - map1)
                 if dist < threshold:
-                    active_agents[i].highlight = True
-                    active_agents[j].highlight = True
+                    active_agents[host1].highlight = True
+                    active_agents[host2].highlight = True
 
     def getAgentPositions(self):
         data = dict()
@@ -525,7 +539,6 @@ class Translator(multiprocessing.Process):
         data["type"] = "update_points"
         msg = dict(rd=data)
         self.broadcast(msg)
-
 
     def updatePlotQueue(self):
         if self.updated and self.plot_q is not None:

@@ -79,24 +79,21 @@ bool checkConnection(void *){
 }
 
 bool ping(void *){
-  // udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
-  // udp.print("{\"server\":{\"type\": \"whoami\"}}");
-
   if(client.connected()){
-    client.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+    client.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}\n", mac);
     if(station[0] == 0){
-      client.print("{\"server\":{\"type\": \"whoami\"}}");
+      client.println("{\"server\":{\"type\": \"whoami\"}}");
     }
+    blink();
   }
 
-  blink();
   return true;
 }
 
 void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW);return true;} );
+  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW); return true;} );
 }
 
 void parsePacket(AsyncUDPPacket packet){
@@ -120,14 +117,21 @@ void parsePacket(AsyncUDPPacket packet){
       Serial.print("station set to ");
       Serial.println(station);
     }
+
+    if(details.containsKey("i2c")){
+      uint8_t addr = details["i2c"];
+      setAddress(addr, 0);
+      Serial.printf("set i2c address to %u", addr);
+    }
   }
 
   if(doc.containsKey("all")){
     if(doc["all"]["type"] == "lighthouse"){
-      Serial.println("lighthouse");
-      host = packet.remoteIP();
-      port = doc["all"]["tcp_port"];
-      // connect();
+      if(!client.connected()){
+        Serial.println("lighthouse");
+        host = packet.remoteIP();
+        port = doc["all"]["tcp_port"];
+      }
     }
   }
 
@@ -202,7 +206,6 @@ void parsePacket(AsyncUDPPacket packet){
   return;
 }
 
-
 bool turnValveOff(void *){
   Serial.println("turnValveOff");
   digitalWrite(VALVE_PIN, LOW);
@@ -234,15 +237,11 @@ bool updateTouch(void*){
     touchCount = count;
 
     if(client.connected()){
-      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", touchCount, station);
-      Serial.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", touchCount, station);
+      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
     }
-
-    // udp.printf("{\"%s\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}", station, touchCount, station);
   }
   return true;
 }
-
 
 void setup() {
   Serial.begin(115200);
@@ -285,13 +284,12 @@ void setup() {
   timer.every(1000, checkConnection);
   timer.every(RAMP_TIME, updateRamp);
   timer.every(1000, updateTouch);
-  ping(0);
 
-  // udp.print("{\"server\":{\"type\": \"whoami\"}}");
 }
 
 void loop() {
   timer.tick();
+  blink_timer.tick();
   air_timer.tick();
 }
 

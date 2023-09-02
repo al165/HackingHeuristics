@@ -4,17 +4,20 @@
     <meta charset="UTF-8" />
     <title>HOTSPOT Live Status</title>
     <style>
+        body {
+            font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
+        }
         #result {
             font-family: 'Courier New', Courier, monospace;
             white-space: pre-wrap;
             word-wrap: break-word;
-            color: black;
+            color: rgb(38, 106, 207);
         }
         .string { color: darkred; }
         .number { color: green; }
         .boolean { color: blue; font-weight: bold; }
         .null { color: magenta; }
-        .key { color: black; }
+        .key { font-weight: bold; }
         #error {
             color: red;
             background-color: antiquewhite;
@@ -22,17 +25,19 @@
     </style>
 </head>
 <body>
+    <h1><i>HOTSPOT</i> ESP and Server Status</h1>
+    <p>Data refreshes every 500ms, so some changes or messages may be missed in this printout!</p>
     <span id="error"></span>
     <span id="time"></span>
     <pre id="result">
 {
     live data will appear here
-}</pre>
+}
+    </pre>
     <script>
 
-
 function getStatus(){
-    fetch("http://localhost:8080/status").then((res) => {
+    fetch(window.location.href + "status").then((res) => {
         return res.json();
     }).then((json_data) => {
         data = JSON.stringify(json_data, undefined, 2);
@@ -41,13 +46,13 @@ function getStatus(){
         let date = new Date();
         document.querySelector("#time").innerText = date.toJSON();
         document.querySelector("#error").innerText = "";
-        setTimeout(getStatus, 200);
+        setTimeout(getStatus, 500);
     }).catch((err) => {
         console.log(err)
         let date = new Date();
         document.querySelector("#time").innerText = date.toJSON();
         document.querySelector("#error").innerText = err;
-        setTimeout(getStatus, 200);
+        setTimeout(getStatus, 2000);
     });
 }
 

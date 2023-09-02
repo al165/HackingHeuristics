@@ -5,6 +5,7 @@ import struct
 import socket
 import argparse
 import threading
+import socketserver
 import multiprocessing
 from http.server import BaseHTTPRequestHandler, HTTPServer, SimpleHTTPRequestHandler
 
@@ -63,8 +64,8 @@ parser.add_argument(
 
 
 embedder_params = {
-    "feature_size": 8,
-    "hidden_size": [16, 8],
+    "feature_size": 6,
+    "hidden_size": [8, 8],
     "latent_size": 2,
 }
 
@@ -94,7 +95,6 @@ def processBuffer(data):
         print(e)
         return {"data0": [], "data1": [], "data2": [], "data3": [], "active": False, "type": "sensor"}
 
-
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
     def default(self, obj):
@@ -105,7 +105,6 @@ class NumpyEncoder(json.JSONEncoder):
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
-
 
 def makeHTTPServer(msg_q, state):
     class HH_HttpServer(BaseHTTPRequestHandler):
@@ -120,37 +119,34 @@ def makeHTTPServer(msg_q, state):
             self.end_headers()
 
         def do_GET(self):
-            self.send_response(200, 'OK')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            try:
+                self.send_response(200, 'OK')
+                self.send_header('Access-Control-Allow-Origin', '*')
 
-            if self.path == "/":
-                self.send_header('Content-type', 'html')
-                self.end_headers()
+                if self.path == "/":
+                    self.send_header('Content-type', 'html')
+                    self.end_headers()
 
-                with open('./status.html', 'rb') as file: 
-                    self.wfile.write(file.read()) 
+                    with open('./status.html', 'rb') as file: 
+                        self.wfile.write(file.read()) 
 
-            elif self.path == "/status":
-                self.send_header('Content-type', 'json')
-                self.end_headers()
-                # state = {"test": "status", "alive": False, "list": [1, 2, 3]}
-                state = dict(self.state)
-                json_string = json.dumps(state, indent=4, sort_keys=True, cls=NumpyEncoder)
-                self.wfile.write(
-                    bytes(
-                        json_string,
-                        'ascii'
+                elif self.path == "/status":
+                    self.send_header('Content-type', 'json')
+                    self.end_headers()
+                    state = dict(self.state)
+                    json_string = json.dumps(state, indent=4, sort_keys=True, cls=NumpyEncoder)
+                    self.wfile.write(bytes(json_string, 'utf-8'))
+                else:
+                    self.send_header('Content-type', 'html')
+                    self.end_headers()
+                    self.wfile.write(
+                        bytes(
+                            "<html> <head><title> HOTSPOT Server </title> </head> <body>Online</body>", 
+                            'ascii'
+                        )
                     )
-                )
-            else:
-                self.send_header('Content-type', 'html')
-                self.end_headers()
-                self.wfile.write(
-                    bytes(
-                        "<html> <head><title> HOTSPOT Server </title> </head> <body>Online</body>", 
-                        'ascii'
-                    )
-                )
+            except BrokenPipeError:
+                return
 
         def do_POST(self):
             self._set_response()
@@ -163,11 +159,6 @@ def makeHTTPServer(msg_q, state):
                 print("error decoding data")
                 self._set_response()
                 return
-
-            # print()
-            # print("do_POST received:")
-            # print(json_data)
-            # print()
 
             addr = self.client_address
             values = processBuffer(json_data)
@@ -187,7 +178,6 @@ def makeHTTPServer(msg_q, state):
 
 def lighthouse(mcast_socket):
     msg = '{"all": {"type": "lighthouse", "port": ' + str(PORT) + ', "host": "' + HOST + '", "tcp_port": ' + str(TCP_PORT) + '}}'
-    # print(msg)
     sent = mcast_socket.sendto(bytes(msg, 'ascii'), (MCAST_GRP, MCAST_PORT))
 
         
@@ -196,7 +186,6 @@ def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}, state_
         try:
             json_data = json.loads(data.decode('ascii'))
             state_d["last_multicast_msg"] = json_data
-            # print(json_data)
         except json.decoder.JSONDecodeError:
             print("error parsing", data.decode('ascii'))
             return
@@ -219,88 +208,33 @@ def multicast_listener(mcast_socket, stop_event, mailboxes, callbacks={}, state_
             pass
         else:
             parse_packet(data, addr)
-
-        # try:
-        #     data, addr = direct_socket.recvfrom(2048)
-        # except socket.timeout:
-        #     pass
-        # else:
-        #     parse_packet(data, addr)
             
 
-def handle_esp(stop_event, conn, addr, mailboxes):
-    print("** New TCP connection from ", addr)
+def makeTCPHandler(stop_event, mailboxes):
+    class TCPHandler(socketserver.StreamRequestHandler):
+        def handle(self):
+            while True:
+                if stop_event.is_set():
+                    break
 
-    with conn:
-        while True:
-            if stop_event.is_set():
-                break
-            
-            try:
-                msg = conn.recv(2048)
-            except TimeoutError:
-                continue
+                self.data = self.rfile.readline().strip()
+                if self.data == b'':
+                    break
 
-            if not msg:
-                break
-
-            try:
-                json_data = json.loads(msg)
-            except json.decoder.JSONDecodeError:
-                print("error in json: ", msg)
-                continue
-            # print("handle_esp")
-            # print(json_data)
-            # print()
-            for recipiant, queue in mailboxes.items():
-                if recipiant in json_data:
-                    queue.put((addr, json_data[recipiant]))
-        
-        print("connection closed...")
-
-
-def TCPServer(stop_event, mailboxes):
-    global TCP_PORT
-    threads = []
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        bound = False
-        s.settimeout(1.0)
-
-        while not bound:
-            try:
-                s.bind(("", TCP_PORT))
-            except OSError:
-                print(" **** TCPServer cannot connect ****")
-                # s.close()
-                TCP_PORT += 1
-                continue
-
-            bound = True
+                try:
+                    json_data = json.loads(self.data)
+                except json.decoder.JSONDecodeError:
+                    print("error in decoding json:", self.data)
+                    continue
                 
-        print("TCP Server connected to port", TCP_PORT)
-        s.listen()
-        connections = []
+                for recipiant, queue in mailboxes.items():
+                    if recipiant in json_data:
+                        queue.put((self.client_address, json_data[recipiant]))
 
-        while True:
-            if stop_event.is_set():
-                break
+            print("connection closed")
 
-            try:
-                conn, addr = s.accept()
-            except TimeoutError:
-                continue
-            
-            t = threading.Thread(
-                target=handle_esp,
-                args=(stop_event, conn, addr, mailboxes),
-            )
-            t.start()
-            threads.append(t)
+    return TCPHandler
 
-        for t in threads:
-            t.join()
-        # s.close()
 
 def makeOscListener(dispatcher=None):
     port = 8086
@@ -309,6 +243,21 @@ def makeOscListener(dispatcher=None):
     )
     print(f"OSC listening on port {port}")
     return server
+
+def makeTCPListener(stop_event, mailboxes=None):
+    global TCP_PORT
+    bound = False
+    while not bound:
+        try:
+            handler = makeTCPHandler(stop_event, mailboxes)
+            server = socketserver.ThreadingTCPServer(("", TCP_PORT), handler)
+        except OSError:
+            print(TCP_PORT, "already bound, trying next")
+            TCP_PORT += 1
+            continue
+
+        print("** TCP bound to", TCP_PORT)
+        return server
 
 client = udp_client.SimpleUDPClient('127.0.0.1', 8085)
 def sendOSC(address: str, args: tuple):
@@ -359,10 +308,6 @@ def main():
     mcast_socket.settimeout(0.2)
     mcast_socket.bind(multicast_group)
 
-    # direct_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # direct_socket.bind((HOST, 8081))
-    # direct_socket.settimeout(0.2)
-
     print()
     print("="*50)
     print(f"  Multicast group:   {MCAST_GRP}:{MCAST_PORT}")
@@ -375,7 +320,6 @@ def main():
 
     ttl = struct.pack('b', 1)
     mcast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-    # mcast_socket.settimeout(2)
     
     mailboxes = dict()
     server_q = multiprocessing.Queue()
@@ -396,7 +340,6 @@ def main():
     scheduler = BackgroundScheduler()
     scheduler.add_job(lighthouse, 'interval', args=(mcast_socket,), seconds=10)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "checkpoint"},), seconds=CHECKPOINT_INTERVAL)
-    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "features"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "output"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "agent_positions"},), seconds=4)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "update_state"},), seconds=0.2)
@@ -450,6 +393,7 @@ def main():
     )
 
     def handle_rd_trigger(*msg):
+        print("handle_rd_trigger")
         data = {"triggered": msg[1], "type": "triggered"}
         broadcast(data)
 
@@ -462,7 +406,10 @@ def main():
     osc_listener_thread = threading.Thread(target=oscd.serve_forever)
 
     # TCP Process
-    tcp_process = multiprocessing.Process(None, TCPServer, args=(stop_event, mailboxes))
+    # tcp_process = multiprocessing.Process(None, TCPServer, args=(stop_event, mailboxes))
+    tcpd = makeTCPListener(stop_event, mailboxes)
+    tcpd.timeout = 3
+    tcp_thread = threading.Thread(target=tcpd.serve_forever)
 
     print()
     print("="*50)
@@ -480,7 +427,7 @@ def main():
     translator.start()
     scheduler.start()
     http_thread.start()
-    tcp_process.start()
+    tcp_thread.start()
     multicast_thread.start()
     osc_listener_thread.start()
 
@@ -500,6 +447,7 @@ def main():
     scheduler.shutdown()
     translator.join()
     oscd.shutdown()
+    tcpd.shutdown()
 
     print("\nDONE")
 
