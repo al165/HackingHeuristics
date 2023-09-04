@@ -71,14 +71,17 @@ class CameraServer(Thread):
             lores_config = {"format": 'YUV420', "size": (320, 240)}
 
         if PICAM_AVAILIABLE:
-            self.picam2 = Picamera2()
-            self.picam2.configure(
-                self.picam2.create_preview_configuration(
-                    main=main_config,
-                    lores=lores_config,
+            try:
+                self.picam2 = Picamera2()
+                self.picam2.configure(
+                    self.picam2.create_preview_configuration(
+                        main=main_config,
+                        lores=lores_config,
+                    )
                 )
-            )
-            self.picam2.start()
+                self.picam2.start()
+            except:
+                self.picam2 = None
         else:
             self.picam2 = None
 
