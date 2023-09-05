@@ -31,6 +31,10 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 WiFiManager wm;
 AsyncUDP udp;
 
+WiFiClient tcpClient;
+IPAddress host(192, 168, 2, 9);
+int tcp_port = 0;
+
 IPAddress MCAST_GRP(224,3,29,71);
 const int UDP_PORT = 10000;
 
@@ -65,9 +69,19 @@ Timer<> valve_timers[6];
 int breath_time_ms = 5000;
 
 
+bool checkConnection(void *){
+  if (!tcpClient.connected() && tcp_port != 0){
+    tcpClient.connect(host, tcp_port);
+  }
+
+  return true;
+}
+
 bool ping(void *){
-  blink();
-  udp.printf("{\"server\":{\"type\": \"ping\", \"mac\":\"%s\"}}", mac);
+  if(tcpClient.connected()){
+    tcpClient.printf("{\"server\":{\"type\":\"ping\",\"mac\":\"%s\"}}\n", mac);
+    blink();
+  }
   return true;
 }
 
@@ -130,6 +144,17 @@ void parsePacket(AsyncUDPPacket packet){
   if(error){
     Serial.println("Error parsing JSON");
     return;
+  }
+
+  if(doc.containsKey("all")){
+    if(doc["all"]["type"] == "lighthouse"){
+      if(!tcpClient.connected()){
+        Serial.println("lighthouse");
+        host = packet.remoteIP();
+        tcp_port = doc["all"]["tcp_port"];
+        Serial.printf("%u.%u.%u.%u host, %u tcp_port\n", host[0], host[1], host[2], host[3], tcp_port);
+      }
+    }
   }
 
   if(doc.containsKey("camera_result")){
@@ -237,7 +262,8 @@ void setup() {
   delay(3000);
   blink();
 
-  timer.every(10000, ping);
+  timer.every(4000, ping);
+  timer.every(2000, checkConnection);
   breath_timer.in(5000, breathe);
 }
 
@@ -245,15 +271,6 @@ void loop() {
   timer.tick();
   blink_timer.tick();
   breath_timer.tick();
-  // unsigned long now = millis();
-  // Serial.printf("now %u last_blink_time %u\n", now, times.last_blink_time);
-  // if(blinking && now >= times.last_blink_time + BLINK_TIME_MS){
-  //   blinking = false;
-  //   digitalWrite(LED_BUILTIN, LOW);
-  //   Serial.println("blink done");
-  // }
-
-
 }
 
 void getMac() {
