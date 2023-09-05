@@ -53,6 +53,7 @@ class CameraServer(Thread):
         state_d: dict = {}
     ):
         super(CameraServer, self).__init__()
+        global PICAM_AVAILIABLE
 
         self.stop_event = stop_event
         self.msg_q = msg_q
@@ -82,10 +83,11 @@ class CameraServer(Thread):
                 self.picam2.start()
             except:
                 self.picam2 = None
+                PICAM_AVAILIABLE = False
         else:
             self.picam2 = None
 
-        self.state_d["camera_server"] = {"picama2": PICAM_AVAILIABLE}
+        self.state_d["camera_server"] = {"picamera2": self.picam2 is not None}
 
         self.im_main = None
         self.im_lores = None
@@ -153,7 +155,7 @@ class CameraServer(Thread):
             self.state_d["camera_server"] = state
 
             if msg_type == "movement":
-                if not PICAM_AVAILIABLE:
+                if self.picam2 is None:
                     continue
                 data = {"type": "movement", "movement": self.movement}
                 self.broadcast(data)

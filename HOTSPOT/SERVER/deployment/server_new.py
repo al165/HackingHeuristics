@@ -1,6 +1,7 @@
 #!/bin/python
 
 import json
+import glob
 import struct
 import socket
 import argparse
@@ -136,6 +137,23 @@ def makeHTTPServer(msg_q, state):
                     state = dict(self.state)
                     json_string = json.dumps(state, indent=4, sort_keys=True, cls=NumpyEncoder)
                     self.wfile.write(bytes(json_string, 'utf-8'))
+                elif self.path == "/cam":
+                    try:
+                        image_list = sorted(glob.glob("./camera_images/*.png"))
+                        with open(image_list[-1], "rb") as file:
+                            self.send_header('Content-type', 'image/png')
+                            self.end_headers()
+                            self.wfile.write(file.read())
+                    except Exception as e:
+                        self.send_header('Content-type', 'html')
+                        self.end_headers()
+                        self.wfile.write(
+                            bytes(
+                                f"<html><head><title> HOTSPOT Server </title> </head> <body><p>camera image not avaliable...Exception:</p><p>{e}</p></body>", 
+                                'ascii'
+                            )
+                        )
+
                 else:
                     self.send_header('Content-type', 'html')
                     self.end_headers()
