@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Hotspot
+Exec=/home/hotspot/HackingHeuristics/start_hotspot.sh
