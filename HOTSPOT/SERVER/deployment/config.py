@@ -28,7 +28,7 @@ STATIONS = {
     "40:22:D8:EA:A3:40": (13, 13, ESP.ESP13),   # ESP13
     "E8:DB:84:C5:C2:B5": (13, 13, ESP.ESP13),   # TESTING ESP
     "C4:4F:33:65:DA:79": (13, 13, ESP.ESP13),   # TESTING ESP
-    "30:AE:A4:F3:48:94": (1, 2, ESP.BLOB),   # TESTING ESP
+    "30:AE:A4:F3:48:94": (1, 7, ESP.BLOB),   # TESTING ESP
     "3C:71:BF:58:FA:A8": (1, 1, ESP.HEADSET),   # TESTING ESP
 }
 ########################
