@@ -60,10 +60,11 @@ class Agent:
             state["active"] = self.active
             state["sensor_data"] = self.sensor_data
             state["sensor_features"] = self.sensor_features
-            state["output_vectors"] = self.output_vectors[-1]
+            state["last_output"] = self.last_output
 
         elif self.esp_type == ESP.BLOB:
             state["i2c"] = f'0x{self.i2c:X}'
             state["touch_count"] = self.touch_count
+            state["last_output"] = self.last_output
 
         return state
