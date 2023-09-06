@@ -116,19 +116,22 @@ void turnValveOn(int station){
 
 bool turnValveOff(void* station){
   digitalWrite(VALVE_PINS[(int) station], LOW);
-  Serial.println("valve %u off\n", station);
+  Serial.printf("valve %u off\n", (int) station);
+
   valveState[(int) station] = 1;
+  valve_timers[(int) station].cancel();
   valve_timers[(int) station].in(PULSE_ON_TIME_MS, setValveAvaliable, station);
 
   display.clearDisplay();
   display.setCursor(20, 20);
-  display.printf("%u off", station);
+  display.printf("%u off", (int) station);
   display.display();
 
   return false;
 }
 
 bool setValveAvaliable(void* station){
+  Serial.printf("valve %u avaliable\n", (int) station);
   valveState[(int) station] = 0;
   return false;
 }

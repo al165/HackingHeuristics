@@ -53,9 +53,9 @@ char mac[18];
 char station[2] = {0, 0};
 
 #define RAMP_TIME 300
-int rampStates = 0;
-int rampVals = 0;
-int targetVals = 0;
+int rampState = 0;
+int rampVal = 0;
+int targetVal = 0;
 
 // timer to simplify scheduling events
 Timer<8> timer;
@@ -93,7 +93,7 @@ bool ping(void *){
 void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW); return true;} );
+  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW); return false;} );
 }
 
 void parsePacket(AsyncUDPPacket packet){
@@ -145,12 +145,12 @@ void parsePacket(AsyncUDPPacket packet){
 
   if (parameters.containsKey("ampl")) {
     int val = parameters["ampl"];
-    if (rampVals > 0) {
-      rampStates = -1;
+    targetVal = val;
+    if (rampVal > targetVal) {
+      rampState = -1;
     } else {
-      rampStates = 1;
+      rampState = 1;
     }
-    targetVals = val;
   }
 
   if (parameters.containsKey("freq")) {
@@ -216,6 +216,7 @@ bool turnValveOff(void *){
 }
 
 bool setValveAvaliable(void*){
+  Serial.println("valveAvaliable again");
   valveState = 0; 
   return true;
 }
@@ -284,7 +285,6 @@ void setup() {
   timer.every(1000, checkConnection);
   timer.every(RAMP_TIME, updateRamp);
   timer.every(1000, updateTouch);
-
 }
 
 void loop() {
@@ -294,24 +294,24 @@ void loop() {
 }
 
 bool updateRamp(void *) {
-  if (rampStates == -1) {
-    if (rampVals == 0) {
-      rampStates = 1;
+  if (rampState == -1) {
+    if (rampVal <= targetVal) {
+      rampState = 0;
     } else {
-      rampVals -= 1;
-      setAmplitude(1, rampVals);
-      setAmplitude(2, rampVals);
+      rampVal -= 1;
+      setAmplitude(1, rampVal);
+      setAmplitude(2, rampVal);
 
       startStimulation(1, 2);
       startStimulation(2, 2);
     }
-  } else if (rampStates == 1) {
-    if (rampVals >= targetVals) {
-      rampStates = 0;
+  } else if (rampState == 1) {
+    if (rampVal >= targetVal) {
+      rampState = 0;
     } else {
-      rampVals += 1;
-      setAmplitude(1, rampVals);
-      setAmplitude(2, rampVals);
+      rampVal += 1;
+      setAmplitude(1, rampVal);
+      setAmplitude(2, rampVal);
 
       startStimulation(1, 2);
       startStimulation(2, 2);
