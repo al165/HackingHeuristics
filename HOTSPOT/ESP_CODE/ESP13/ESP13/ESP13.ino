@@ -56,14 +56,6 @@ Timer<> blink_timer;
 Timer<> breath_timer;
 Timer<> valve_timers[6];
 
-// struct Times {
-//   unsigned long last_blink_time;
-//   unsigned long last_breath_time;
-//   unsigned long last_valve_time[6];
-// };
-// Times times;
-// bool blinking = false;
-
 #define BLINK_TIME_MS 200
 #define VALVE_TIME_MS 500
 int breath_time_ms = 5000;
@@ -91,7 +83,6 @@ void blink(){
 }
 
 bool breathe(void* station){
-  // times.last_breath_time = millis();
   display.clearDisplay();
   Serial.print("breathe: ");
   float p = random(10000)/10000.0;
@@ -113,6 +104,7 @@ void turnValveOn(int station){
   Serial.printf("valve %u on\n", station);
 
   display.clearDisplay();
+  display.setCursor(20, 20);
   display.printf("%u", station);
   display.display();
 
@@ -124,8 +116,15 @@ void turnValveOn(int station){
 
 bool turnValveOff(void* station){
   digitalWrite(VALVE_PINS[(int) station], LOW);
+  Serial.println("valve %u off\n", station);
   valveState[(int) station] = 1;
   valve_timers[(int) station].in(PULSE_ON_TIME_MS, setValveAvaliable, station);
+
+  display.clearDisplay();
+  display.setCursor(20, 20);
+  display.printf("%u off", station);
+  display.display();
+
   return false;
 }
 
@@ -271,6 +270,9 @@ void loop() {
   timer.tick();
   blink_timer.tick();
   breath_timer.tick();
+  for(int i=0; i<6; i++){
+    valve_timers[i].tick();
+  }
 }
 
 void getMac() {
