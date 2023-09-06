@@ -299,7 +299,7 @@ void sendFeatures(){
 
   char output[512];
   serializeJson(doc, output);
-  Serial.println(output);
+  // Serial.println(output);
 
   tcpClient.println(output);
   blink();
