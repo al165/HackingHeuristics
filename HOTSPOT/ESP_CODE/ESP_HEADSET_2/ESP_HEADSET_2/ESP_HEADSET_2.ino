@@ -489,7 +489,8 @@ bool updateScreen(void *) {
   // display.fillCircle(x3, y0,  r3, SSD1306_WHITE);
 
   // show message
-  display.setTextSize(1);
+  display.clearDisplay();
+  display.setTextSize(2);
   display.setTextColor(WHITE, BLACK);
   display.printf(
     "%f.3f\n%f.3f\n%f.3f\n%f.3f", 
