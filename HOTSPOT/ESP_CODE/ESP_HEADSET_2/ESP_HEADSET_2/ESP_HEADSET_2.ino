@@ -448,6 +448,7 @@ void setup() {
   timer.every(4000, ping);
   timer.every(2000, checkConnection);
   timer.every(2000, getFeatures);
+  timer.every(100, updateScreen);
 
   delay(100);
 }
@@ -459,7 +460,7 @@ void loop() {
   temp_timer.tick();
 }
 
-void updateScreen() {
+bool updateScreen(void *) {
   // Serial.println("updateScreen");
   // u8x8.setFont(u8x8_font_chroma48medium8_r);
   // u8x8.drawString(0,1,"Hello World!");
@@ -505,7 +506,7 @@ void updateScreen() {
 
   display.display(); 
   // Serial.println("display done");
-
+  return true;
 }
 
 void getMac() {

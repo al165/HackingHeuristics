@@ -182,14 +182,14 @@ void parsePacket(AsyncUDPPacket packet){
   if (parameters.containsKey("airtime")){
     // set length of air valve time
     airTime = parameters["airtime"];
+    if(airTime > MAX_AIR_TIME){
+      airTime = MAX_AIR_TIME;
+    }
   }
 
   if (parameters.containsKey("airon")){
     // open or close air valve
     float val = parameters["airon"];
-    if(val > MAX_AIR_TIME){
-      val = (float) MAX_AIR_TIME;
-    }
 
     // if(val < 0.5 && valveState == 2){
     //   turnValveOff(0);
