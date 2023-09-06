@@ -355,12 +355,12 @@ def main():
     def add_message(msg_q, msg):
         msg_q.put(((HOST, PORT), msg))
 
-    scheduler = BackgroundScheduler()
+    scheduler = BackgroundScheduler({'apscheduler.job_defaults.max_instances': 3})
     scheduler.add_job(lighthouse, 'interval', args=(mcast_socket,), seconds=10)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "checkpoint"},), seconds=CHECKPOINT_INTERVAL)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "output"},), seconds=UPDATE_TIME)
     scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "agent_positions"},), seconds=4)
-    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "update_state"},), seconds=0.2)
+    scheduler.add_job(add_message, 'interval', args=(server_q, {"type": "update_state"},), seconds=0.5)
 
     translator = Translator(
         server_q,
