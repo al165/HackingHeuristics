@@ -198,6 +198,8 @@ void parsePacket(AsyncUDPPacket packet){
       valveState = 2;
       digitalWrite(VALVE_PIN, HIGH);
       Serial.println("turnValveOn");
+
+      sendValveState();
       
       air_timer.in((int)(airTime * 1000), turnValveOff);
     } 
@@ -210,6 +212,7 @@ bool turnValveOff(void *){
   Serial.println("turnValveOff");
   digitalWrite(VALVE_PIN, LOW);
   valveState = 1;
+  sendValveState();
 
   air_timer.in((int)(AIR_ON_WAIT * 1000), setValveAvaliable);
   return true;
@@ -218,6 +221,7 @@ bool turnValveOff(void *){
 bool setValveAvaliable(void*){
   Serial.println("valveAvaliable again");
   valveState = 0; 
+  sendValveState();
   return true;
 }
 
@@ -240,8 +244,24 @@ bool updateTouch(void*){
     if(client.connected()){
       client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
     }
+
+    if(touchCount > 0 && valveState != 2){
+      valveState = 2;
+      digitalWrite(VALVE_PIN, HIGH);
+      Serial.println("turnValveOn");
+
+      sendValveState();
+      
+      air_timer.in((int)(5000), turnValveOff);
+    }
   }
   return true;
+}
+
+void sendValveState(){
+  if(client.connected()){
+    client.printf("{\"server\":{\"type\": \"valve_state\", \"valve\": %d, \"station\": \"%s\"}}\n", valveState, station);
+  }
 }
 
 void setup() {
