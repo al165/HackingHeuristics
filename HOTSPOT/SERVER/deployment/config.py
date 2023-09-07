@@ -101,7 +101,7 @@ OUTPUT_VECTOR = [
 ]
 
 OUTPUT_VECTOR_RANGES = {
-    "ampl": [1, 4],
+    "ampl": [1, 3],
     "freq": [1, 100],
     "durn": [0, 2000],
     "idly": [0, 255],
