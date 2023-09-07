@@ -132,7 +132,7 @@ def makeHTTPServer(msg_q, state):
                         self.wfile.write(file.read()) 
 
                 elif self.path == "/status":
-                    self.send_header('Content-type', 'json')
+                    self.send_header('Content-type', 'application/json')
                     self.end_headers()
                     state = dict(self.state)
                     json_string = json.dumps(state, indent=4, sort_keys=True, cls=NumpyEncoder)

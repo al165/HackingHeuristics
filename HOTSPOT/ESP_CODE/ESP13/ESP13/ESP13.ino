@@ -40,8 +40,8 @@ const int UDP_PORT = 10000;
 
 char mac[18];
 
-#define MAX_AIR_TIME_S 10
-#define PULSE_ON_TIME_MS 500
+#define PULSE_ON_TIME_MS 2000
+#define WAIT_BETWEEN_AIR_ON_MS 10000
 const int VALVE_PINS[] = {26, 16, 17, 18, 19, 23};
 // 0: off and avaliable, 1: off and deflating 2: on
 bool valveState[] = {0, 0, 0, 0, 0, 0};
@@ -51,7 +51,7 @@ float probOffset = 0.05;
 float observerOffset = 0.0;
 
 
-Timer<> timer;
+Timer<4> timer;
 Timer<> blink_timer;
 Timer<> breath_timer;
 Timer<> valve_timers[6];
@@ -84,16 +84,14 @@ void blink(){
 
 bool breathe(void* station){
   display.clearDisplay();
-  Serial.print("breathe: ");
+  Serial.println("breathe");
   float p = random(10000)/10000.0;
   // Serial.printf("%f p %f probOffset", p, probOffset);
 
   if(p < probOffset + observerOffset){
     int i = random(6);
     turnValveOn(i);
-    Serial.println("on");
   } else {
-    Serial.println("-");
   }
 
   breath_timer.in(1000 + random(5000), breathe);
@@ -110,8 +108,10 @@ void turnValveOn(int station){
 
   digitalWrite(VALVE_PINS[station], HIGH);
   valveState[(int) station] = 2;
-  valve_timers[station].cancel();
-  valve_timers[station].in(500, turnValveOff, (void*)station);
+  // valve_timers[station].cancel();
+  valve_timers[station].in(PULSE_ON_TIME_MS, turnValveOff, (void*)station);
+
+  sendValveState();
 }
 
 bool turnValveOff(void* station){
@@ -119,13 +119,15 @@ bool turnValveOff(void* station){
   Serial.printf("valve %u off\n", (int) station);
 
   valveState[(int) station] = 1;
-  valve_timers[(int) station].cancel();
-  valve_timers[(int) station].in(PULSE_ON_TIME_MS, setValveAvaliable, station);
+  // valve_timers[(int) station].cancel();
+  valve_timers[(int) station].in(WAIT_BETWEEN_AIR_ON_MS, setValveAvaliable, station);
 
   display.clearDisplay();
   display.setCursor(20, 20);
   display.printf("%u off", (int) station);
   display.display();
+
+  sendValveState();
 
   return false;
 }
@@ -133,7 +135,24 @@ bool turnValveOff(void* station){
 bool setValveAvaliable(void* station){
   Serial.printf("valve %u avaliable\n", (int) station);
   valveState[(int) station] = 0;
+  sendValveState();
   return false;
+}
+
+void sendValveState(){
+  if(!tcpClient.connected()){
+    return;
+  }
+
+  tcpClient.printf(
+    "{\"server\":{\"type\": \"valve_state\", \"valve_state\": [%i, %i, %i, %i, %i, %i], \"station\": \"13\"}}\n", 
+    valveState[0],
+    valveState[1],
+    valveState[2],
+    valveState[3],
+    valveState[4],
+    valveState[5]
+  );
 }
 
 void parsePacket(AsyncUDPPacket packet){
@@ -267,6 +286,8 @@ void setup() {
   timer.every(4000, ping);
   timer.every(2000, checkConnection);
   breath_timer.in(5000, breathe);
+
+  sendValveState();
 }
 
 void loop() {

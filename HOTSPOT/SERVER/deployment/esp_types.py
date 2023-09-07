@@ -44,6 +44,11 @@ class Agent:
         self.i2c = 0x1A
         self.touch_count = 0
 
+        if self.esp_type == ESP.ESP13:
+            self.valve_state = [0, 0, 0, 0, 0, 0]
+        else:
+            self.valve_state = 0
+
         self.map.append(np.array([0.0, 0.0]))
 
     def getSummary(self):
@@ -66,5 +71,9 @@ class Agent:
             state["i2c"] = f'0x{self.i2c:X}'
             state["touch_count"] = self.touch_count
             state["last_output"] = self.last_output
+            state["valve_state"] = self.valve_state
+
+        elif self.esp_type == ESP.ESP13:
+            state["valve_state"] = self.valve_state
 
         return state

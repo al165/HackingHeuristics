@@ -366,8 +366,9 @@ class Translator(multiprocessing.Process):
                     self.agents[host].touch_count = msg["touch_count"]
             
             elif msg_type == "valve_state":
+                print(msg["valve_state"])
                 if host in self.agents:
-                    self.agent[host].valve_state = msg["valve_state"]
+                    self.agents[host].valve_state = msg["valve_state"]
 
             elif msg_type == "save_state":
                 self.saveState()

@@ -57,7 +57,6 @@ int rampState = 0;
 int rampVal = 0;
 int targetVal = 0;
 
-// timer to simplify scheduling events
 Timer<8> timer;
 
 #define MAX_AIR_TIME 8
@@ -242,7 +241,7 @@ bool updateTouch(void*){
     touchCount = count;
 
     if(client.connected()){
-      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
+      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %i, \"station\": \"%s\"}}\n", touchCount, station);
     }
 
     if(touchCount > 0 && valveState != 2){
@@ -260,7 +259,7 @@ bool updateTouch(void*){
 
 void sendValveState(){
   if(client.connected()){
-    client.printf("{\"server\":{\"type\": \"valve_state\", \"valve\": %d, \"station\": \"%s\"}}\n", valveState, station);
+    client.printf("{\"server\":{\"type\": \"valve_state\", \"valve_state\": %i, \"station\": \"%s\"}}\n", valveState, station);
   }
 }
 
@@ -305,6 +304,7 @@ void setup() {
   timer.every(1000, checkConnection);
   timer.every(RAMP_TIME, updateRamp);
   timer.every(1000, updateTouch);
+  sendValveState();
 }
 
 void loop() {
