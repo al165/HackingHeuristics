@@ -8,6 +8,7 @@ echo
 cd /home/hotspot/HackingHeuristics/HOTSPOT/SERVER/deployment 
 /usr/bin/python3 server_new.py --load --trace &
 SVR=$!
+echo "server PID: $SVR"
 
 echo "*** Starting RD ***"
 echo

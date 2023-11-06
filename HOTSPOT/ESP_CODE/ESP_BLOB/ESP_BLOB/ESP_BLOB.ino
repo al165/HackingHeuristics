@@ -53,11 +53,10 @@ char mac[18];
 char station[2] = {0, 0};
 
 #define RAMP_TIME 300
-int rampStates = 0;
-int rampVals = 0;
-int targetVals = 0;
+int rampState = 0;
+int rampVal = 0;
+int targetVal = 0;
 
-// timer to simplify scheduling events
 Timer<8> timer;
 
 #define MAX_AIR_TIME 8
@@ -93,7 +92,7 @@ bool ping(void *){
 void blink(){
   blink_timer.cancel();
   digitalWrite(LED_BUILTIN, HIGH);
-  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW); return true;} );
+  blink_timer.in(200, [](void*) -> bool {digitalWrite(LED_BUILTIN, LOW); return false;} );
 }
 
 void parsePacket(AsyncUDPPacket packet){
@@ -145,12 +144,12 @@ void parsePacket(AsyncUDPPacket packet){
 
   if (parameters.containsKey("ampl")) {
     int val = parameters["ampl"];
-    if (rampVals > 0) {
-      rampStates = -1;
+    targetVal = val;
+    if (rampVal > targetVal) {
+      rampState = -1;
     } else {
-      rampStates = 1;
+      rampState = 1;
     }
-    targetVals = val;
   }
 
   if (parameters.containsKey("freq")) {
@@ -182,14 +181,14 @@ void parsePacket(AsyncUDPPacket packet){
   if (parameters.containsKey("airtime")){
     // set length of air valve time
     airTime = parameters["airtime"];
+    if(airTime > MAX_AIR_TIME){
+      airTime = MAX_AIR_TIME;
+    }
   }
 
   if (parameters.containsKey("airon")){
     // open or close air valve
     float val = parameters["airon"];
-    if(val > MAX_AIR_TIME){
-      val = (float) MAX_AIR_TIME;
-    }
 
     // if(val < 0.5 && valveState == 2){
     //   turnValveOff(0);
@@ -198,6 +197,8 @@ void parsePacket(AsyncUDPPacket packet){
       valveState = 2;
       digitalWrite(VALVE_PIN, HIGH);
       Serial.println("turnValveOn");
+
+      sendValveState();
       
       air_timer.in((int)(airTime * 1000), turnValveOff);
     } 
@@ -210,13 +211,16 @@ bool turnValveOff(void *){
   Serial.println("turnValveOff");
   digitalWrite(VALVE_PIN, LOW);
   valveState = 1;
+  sendValveState();
 
   air_timer.in((int)(AIR_ON_WAIT * 1000), setValveAvaliable);
   return true;
 }
 
 bool setValveAvaliable(void*){
+  Serial.println("valveAvaliable again");
   valveState = 0; 
+  sendValveState();
   return true;
 }
 
@@ -237,10 +241,26 @@ bool updateTouch(void*){
     touchCount = count;
 
     if(client.connected()){
-      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %d, \"station\": \"%s\"}}\n", touchCount, station);
+      client.printf("{\"server\":{\"type\": \"touch_count\", \"touch_count\": %i, \"station\": \"%s\"}}\n", touchCount, station);
+    }
+
+    if(touchCount > 0 && valveState == 0){
+      valveState = 2;
+      digitalWrite(VALVE_PIN, HIGH);
+      Serial.println("turnValveOn");
+
+      sendValveState();
+      
+      air_timer.in((int)(1000), turnValveOff);
     }
   }
   return true;
+}
+
+void sendValveState(){
+  if(client.connected()){
+    client.printf("{\"server\":{\"type\": \"valve_state\", \"valve_state\": %i, \"station\": \"%s\"}}\n", valveState, station);
+  }
 }
 
 void setup() {
@@ -284,7 +304,7 @@ void setup() {
   timer.every(1000, checkConnection);
   timer.every(RAMP_TIME, updateRamp);
   timer.every(1000, updateTouch);
-
+  sendValveState();
 }
 
 void loop() {
@@ -294,24 +314,24 @@ void loop() {
 }
 
 bool updateRamp(void *) {
-  if (rampStates == -1) {
-    if (rampVals == 0) {
-      rampStates = 1;
+  if (rampState == -1) {
+    if (rampVal <= targetVal) {
+      rampState = 0;
     } else {
-      rampVals -= 1;
-      setAmplitude(1, rampVals);
-      setAmplitude(2, rampVals);
+      rampVal -= 1;
+      setAmplitude(1, 1);
+      setAmplitude(2, rampVal+1);
 
       startStimulation(1, 2);
       startStimulation(2, 2);
     }
-  } else if (rampStates == 1) {
-    if (rampVals >= targetVals) {
-      rampStates = 0;
+  } else if (rampState == 1) {
+    if (rampVal >= targetVal) {
+      rampState = 0;
     } else {
-      rampVals += 1;
-      setAmplitude(1, rampVals);
-      setAmplitude(2, rampVals);
+      rampVal += 1;
+      setAmplitude(1, 1);
+      setAmplitude(2, rampVal+1);
 
       startStimulation(1, 2);
       startStimulation(2, 2);
